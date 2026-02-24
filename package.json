@@ -3,5 +3,8 @@
     "@anthropic-ai/sdk": "^0.74.0",
     "googleapi": "^1.0.2",
     "googleapis": "^171.4.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.3"
   }
 }
