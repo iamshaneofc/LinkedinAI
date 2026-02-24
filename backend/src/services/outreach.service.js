@@ -10,7 +10,7 @@ const outreachService = {
         if (!lead.email) return { success: false, error: 'No email' };
         try {
             const subject = options.subject || 'Connection request';
-            const text = message || `Hi ${lead.first_name}, I'd like to connect.`;
+            const text = message || `Saw your profile—would be good to connect.`;
             await emailService.sendEmail(lead.email, subject, text);
             return { success: true };
         } catch (err) {

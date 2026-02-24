@@ -136,7 +136,7 @@ async function executeStepForLead(lead) {
                         console.error('Gmail draft generation failed:', err.message);
                         const content = JSON.stringify({
                             subject: `Quick thought for ${profile.first_name}`,
-                            body: `Hi ${profile.first_name},\n\nI came across your profile and would like to connect.\n\nBest regards`
+                            body: `Saw your work at ${profile.company || 'your company'}—would be good to connect.\n\nBest`
                         });
                         await ApprovalService.addToQueue(lead.campaign_id, lead.lead_id, lead.step_type, content);
                     }

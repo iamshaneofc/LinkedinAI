@@ -1183,15 +1183,15 @@ export async function bulkEnrichAndPersonalize(req, res) {
         } catch (aiError) {
           console.error(`   ⚠️  AI generation failed: ${aiError.message}`);
           if (enrichmentData && enrichmentData.bio) {
-            const bioSnippet = enrichmentData.bio.substring(0, 100);
-            personalizedMessage = `Hi ${lead.first_name}, I noticed your background in ${lead.title || 'your field'}. ${bioSnippet} I'd love to connect and explore how we might work together.`;
+            const bioSnippet = enrichmentData.bio.substring(0, 80);
+            personalizedMessage = `That bit in your profile about ${bioSnippet}... resonated. Would be great to connect.`;
           } else {
-            personalizedMessage = `Hi ${lead.first_name}, I hope this message finds you well. I'd love to connect and discuss how we might work together.`;
+            personalizedMessage = `Your work at ${lead.company || 'your company'} caught my eye—would like to connect.`;
           }
         }
 
         if (!personalizedMessage || personalizedMessage.trim().length === 0) {
-          personalizedMessage = `Hi ${lead.first_name}, I hope this message finds you well. I'd love to connect and discuss how we might work together.`;
+          personalizedMessage = `Your work at ${lead.company || 'your company'} caught my eye—would like to connect.`;
         }
 
         console.log(`   📝 Message generated (${personalizedMessage.length} chars)`);

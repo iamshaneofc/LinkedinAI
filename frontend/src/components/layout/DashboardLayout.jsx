@@ -171,14 +171,8 @@ export default function DashboardLayout() {
                         {/* ── Nav ── */}
                         <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4 px-3">
                             {sidebarOpen && (
-                                <div className="mb-4 rounded-2xl border border-border/40 bg-card/50 px-3 py-2.5 backdrop-blur-sm">
-                                    <div className="flex items-center justify-between gap-2">
-                                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Navigation</p>
-                                        <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                                            <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-                                            Live
-                                        </span>
-                                    </div>
+                                <div className="mb-4 flex justify-center">
+                                    <img src="/logo.jpg" alt="Scottish Chemical Industries" className="h-12 w-auto max-w-full object-contain" />
                                 </div>
                             )}
 

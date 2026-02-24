@@ -53,6 +53,21 @@ if (openai) {
 }
 console.log('');
 
+// ─── Human-like writing: avoid generic/template feel ─────────────────────────
+const HUMAN_WRITER_BLOCK = `
+CRITICAL — SOUND EFFORTLESS AND NATURAL:
+- Do NOT default to "Hi [Name]," at the start. Vary your opening every time: start with a direct observation, a question, a single line that hooks, or dive straight in—like a DM or a note you'd actually send. Use their name only if it fits naturally (middle or end of message), or don't use it at all.
+- You've read their profile. Reference SPECIFIC details (exact phrase from bio, concrete post topic, real role/company)—not "your expertise" or "your work."
+- Sound like you're dropping them a note, not "reaching out" or "hoping to connect." Short sentences. Occasional fragment. No buildup, no formal outreach tone.
+- NEVER use: "I recently came across", "Given your interest in", "Would you be interested in learning more", "It's impressive to see", "could provide valuable insights", "Your expertise would be a tremendous addition", "I'd love to connect" without a concrete reason first, "I hope this message finds you well", "I'd love to hear your thoughts" as a standalone closer.
+
+STRUCTURE VARIETY (every message must be different):
+- BANNED OPENINGS — do not start with: "That latest product update you shared", "The latest product update you shared", "That post you shared", "The post you shared", "Your recent post", "That [X] you shared", "The [X] you shared". Each message must have a UNIQUE first sentence—never reuse the same opener pattern.
+- Vary your FIRST sentence: use a question, or a short observation (different wording every time), or a contrast, or a single detail that's specific to them. Invent a fresh opener for this person only.
+- Vary your LAST sentence: don't always end with "Let me know if you're up for a chat" or "Would love to chat more" or "Thought it might be interesting for you". Mix: a question, a soft invite, an open-ended line, or a brief sign-off. Different structure and wording every time.
+- Vary sentence length and rhythm: some messages use more short punchy sentences; others flow in longer lines. No two messages should feel like the same template.
+`;
+
 class AIService {
     /**
      * Check if ANY AI is configured
@@ -131,10 +146,10 @@ class AIService {
      */
     static getFallbackConnectionMessage(lead, enrichment = null) {
         if (enrichment && enrichment.bio) {
-            const bioSnippet = (enrichment.bio || '').substring(0, 80);
-            return `Hi ${lead.first_name}, I noticed your work at ${lead.company || 'your company'} and your background in ${enrichment.interests?.[0] || lead.title || 'your field'}. ${bioSnippet}${bioSnippet.length >= 80 ? '...' : ''} I'd love to connect!`;
+            const bioSnippet = (enrichment.bio || '').substring(0, 60);
+            return `Saw your work at ${lead.company || 'your company'} and the bit about ${bioSnippet}${bioSnippet.length >= 60 ? '...' : ''} — would be great to connect.`;
         }
-        return `Hi ${lead.first_name}, I'd love to connect and explore potential synergies between our work.`;
+        return `Your work at ${lead.company || 'your company'} caught my eye—would like to connect.`;
     }
 
     /**
@@ -218,34 +233,35 @@ class AIService {
                 general: 'Use a mix of their bio, title, and company. Balanced personalization.'
             };
 
-            const prompt = `You are writing a personalized LinkedIn connection request. Generate a UNIQUE message that shows you've researched this person's profile AND aligns with the campaign goals.
+            const prompt = `You're a real person sending a LinkedIn connection note. You know this profile—write something that could only be for THIS person. Sound natural. Not like a template or "outreach."
 
-Lead Information:
-- Name: ${lead.full_name}
-- Title: ${lead.title || 'N/A'}
-- Company: ${lead.company || 'N/A'}${enrichmentContext}${campaignContext}
+Lead: ${lead.full_name} | ${lead.title || 'N/A'} | ${lead.company || 'N/A'}${enrichmentContext}${campaignContext}
+${HUMAN_WRITER_BLOCK}
 
-PERSONALIZATION (follow these):
-- TONE: ${toneInstructions[tone] || toneInstructions.professional}
-- LENGTH: ${lengthInstructions[length] || lengthInstructions.medium}
-- FOCUS: ${focusInstructions[focus] || focusInstructions.general}
+OPENING (important): Do NOT start with "Hi [Name],". Do NOT start with "That/the latest product update you shared" or "That/the post you shared" or any "[That/The] [thing] you shared"—those make every message look the same. For THIS person only, pick ONE opening style and make the first sentence unique:
+- Option A: Start with a question (about their work, their company, or something from their profile).
+- Option B: Start with a one-line observation—but phrase it in a completely different way (e.g. reference their role, a line from their bio, or their company—not "the update you shared").
+- Option C: Start with a short fragment or a contrast (e.g. "Supply chain at Cemex—tough space to innovate in." or "Pohang's been on my radar for a while.").
+- Option D: Dive straight into one specific detail with unexpected wording.
+Use their first name (${lead.first_name}) only if it fits naturally—or omit it. The goal is this message could never be confused with another: different first sentence, different flow, different last sentence.
+
+CLOSING: Do not repeat the same closer every time. Vary: a question, a soft "if you're ever up for it", a one-word sign-off, or an open-ended line. No "Let me know if you're up for a chat" or "Would love to chat more" as default—pick something that fits this message only.
+
+PERSONALIZATION: TONE ${toneInstructions[tone] || toneInstructions.professional} | LENGTH ${lengthInstructions[length] || lengthInstructions.medium} | FOCUS ${focusInstructions[focus] || focusInstructions.general}
 
 RULES:
-1. Reference SPECIFIC details from their profile (bio, title, company, or recent activity).
-2. NO generic "I'd love to connect" without context. Explain WHY based on their profile.
-3. ${campaign ? 'ALIGN the message with the campaign goal and context. Make it relevant to why you\'re reaching out in this campaign.' : ''}
-4. NO emojis.
-5. Generate ONLY the message body. No "Hi [Name]," prefix (I'll add it). No quotes.`;
+1. One CONCRETE detail from their profile (quote from bio, specific post topic, or real role/company). If you mention a post or "product update", do NOT start the message with it—weave it in later or open with something else (question, role, company, or a different angle).
+2. Why them—in one or two sentences. Then a brief, low-key ask. No over-the-top closing. Last sentence must be different from generic "Let me know if you're up for a chat" / "Would love to chat more."
+3. ${campaign ? 'Weave in campaign goal only if it fits naturally.' : ''}
+4. NO emojis. Output the FULL message as the reader will see it—no "Hi [Name]," prefix, no quotes.`;
 
             console.log(`   📡 Calling ${AI_PROVIDER.toUpperCase()} (tone=${tone}, length=${length}, focus=${focus})...`);
 
-            let message = await this.callAI(prompt, length === 'short' ? 150 : 350, 0.8);
+            let message = await this.callAI(prompt, length === 'short' ? 150 : 350, 0.92);
 
             if (!message || typeof message !== 'string') message = '';
             message = message.trim();
-            if (!message.toLowerCase().startsWith('hi ') && !message.toLowerCase().startsWith('hello ')) {
-                message = `Hi ${lead.first_name}, ${message}`;
-            }
+            // No forced "Hi first_name," — use AI output as-is for natural variety
 
             const maxLen = length === 'short' ? 300 : 600;
             if (message.length > maxLen) {
@@ -300,10 +316,10 @@ RULES:
                 console.warn(`⚠️ ${AI_PROVIDER.toUpperCase()} not configured, using personalized template`);
                 // Even without AI, use enrichment data to personalize
                 if (enrichment && enrichment.bio) {
-                    const bioSnippet = enrichment.bio.substring(0, 80);
-                    return `Hi ${lead.first_name}, following up on my previous message. I saw your recent work in ${enrichment.interests?.[0] || lead.title || 'your field'} and thought you might find this relevant. Would love to hear your thoughts!`;
+                    const bioSnippet = enrichment.bio.substring(0, 60);
+                    return `That bit in your profile about ${bioSnippet}... resonated. Following up—would be good to chat.`;
                 }
-                return `Hi ${lead.first_name}, following up on my previous message. Would love to hear your thoughts!`;
+                return `Quick follow-up on my last message—would be great to connect when you're free.`;
             }
 
             // Build rich prompt with all available data
@@ -373,50 +389,37 @@ RULES:
                 general: 'Use a mix of their bio, title, and company. Balanced personalization.'
             };
 
-            const prompt = `You are writing a personalized LinkedIn follow-up message. Generate a DETAILED, UNIQUE message that shows you've researched this person and are providing genuine value, while aligning with the campaign goals.
+            const prompt = `You're a real person writing a LinkedIn follow-up. You know this lead and what you said before. Write something that could only be for THIS person. Natural. Not "following up" in a formal way.
 
-Lead Information:
-- Name: ${lead.full_name}
-- Title: ${lead.title || 'N/A'}
-- Company: ${lead.company || 'N/A'}${enrichmentContext}${campaignContext}
+Lead: ${lead.full_name} | ${lead.title || 'N/A'} | ${lead.company || 'N/A'}${enrichmentContext}${campaignContext}
 
-${previousMessages.length > 0 ? `\nPrevious Messages Sent:\n${previousMessages.join('\n---\n')}\n\nBuild on these previous messages naturally.` : ''}
+${previousMessages.length > 0 ? `What you already sent:\n${previousMessages.join('\n---\n')}\n\nBuild on it naturally—don't repeat it.` : ''}
+${HUMAN_WRITER_BLOCK}
 
-PERSONALIZATION (follow these):
-- TONE: ${toneInstructions[tone] || toneInstructions.professional}
-- LENGTH: ${lengthInstructions[length] || lengthInstructions.medium}
-- FOCUS: ${focusInstructions[focus] || focusInstructions.general}
+OPENING: Do NOT start with "Hi [Name]," or "Following up on my last message." Do NOT start with "That/the latest product update you shared" or "That/the post you shared" or any "[That/The] [thing] you shared". For THIS lead only, choose a UNIQUE first sentence:
+- A question (about something they did or posted).
+- A one-line observation phrased in a completely different way (e.g. their role, company, or a specific line from their bio—not "the update you shared").
+- A short fragment or a new angle on their work.
+Use their name (${lead.first_name}) only if it fits, or skip it. This message must have a different structure and different last line than any other—vary your closing too (question vs soft invite vs open-ended).
 
-CRITICAL REQUIREMENTS:
-1. Reference SPECIFIC details from their profile - their bio, recent posts, interests, or work. Show you've been following their activity.
-2. Provide genuine value or insight related to THEIR specific background or recent activity, not generic advice.
-3. ${campaign ? 'ALIGN the message with the campaign goal and context. Make it relevant to why you\'re reaching out in this campaign and what you\'re trying to achieve.' : ''}
-4. Make it UNIQUE - each message must be completely different based on what's unique about this person.
-5. Show genuine interest in their work and demonstrate you've researched them.
-6. NO generic follow-up phrases. Instead, reference something specific from their profile or recent activity.
-7. NO emojis.
-8. Generate ONLY the message body. No "Hi [Name]," prefix (I'll add it). No quotes.
+PERSONALIZATION: TONE ${toneInstructions[tone] || toneInstructions.professional} | LENGTH ${lengthInstructions[length] || lengthInstructions.medium} | FOCUS ${focusInstructions[focus] || focusInstructions.general}
 
-Example of what NOT to write:
-"Hi John, just following up on my previous message. Would love to hear your thoughts!"
-
-Example of what TO write:
-"Hi John, I noticed your recent post about the future of AI in healthcare, and it got me thinking about the challenges you mentioned around data privacy. In my experience working with similar projects, I've found that implementing federated learning approaches can address some of those concerns while maintaining patient confidentiality. I'd love to hear your perspective on this, especially given your background in healthcare technology. Would you be open to a quick conversation about this?"
-
-Generate ONLY the message text, no quotes, no "Hi [Name]," prefix (I'll add that), just the message content.`;
+REQUIREMENTS:
+1. One SPECIFIC detail from their profile or activity. If you mention a post or "product update", do NOT start the message with it—weave it in later or open with a question, their role, or a different angle. Never "your recent post" without saying what it was.
+2. Add a genuine point or value tied to that detail. Sound like you've thought about them.
+3. ${campaign ? 'Tie to campaign only if natural.' : ''}
+4. Vary structure and closing: different first sentence, different last sentence. Short sentences ok. Fragments ok. NO emojis.
+5. Output the FULL message as sent—no "Hi [Name]," prefix, no quotes.`;
 
             console.log(`   📡 Calling ${AI_PROVIDER.toUpperCase()} API (follow-up message, tone=${tone}, length=${length}, focus=${focus})...`);
             console.log(`      Enrichment data available: ${enrichment ? 'Yes' : 'No'}`);
 
             const maxTokens = length === 'short' ? 150 : length === 'long' ? 400 : 300;
-            let message = await this.callAI(prompt, maxTokens, 0.85);
+            let message = await this.callAI(prompt, maxTokens, 0.92);
 
-            // Add greeting if not present
-            if (!message.toLowerCase().startsWith('hi ') && !message.toLowerCase().startsWith('hello ')) {
-                message = `Hi ${lead.first_name}, ${message}`;
-            }
-
-            // Ensure reasonable length based on selected length option
+            // No forced "Hi first_name," — use AI output as-is for natural variety
+            if (!message || typeof message !== 'string') message = '';
+            message = message.trim();
             const maxLen = length === 'short' ? 300 : length === 'long' ? 800 : 600;
             if (message.length > maxLen) {
                 // Try to cut at sentence boundary
@@ -449,40 +452,52 @@ Generate ONLY the message text, no quotes, no "Hi [Name]," prefix (I'll add that
                     throw new Error('AI API quota exceeded. Please check your account billing.');
                 }
             }
-            // Return fallback message
-            return `Hi ${lead.first_name}, following up on my previous message. Would love to connect!`;
+            // Return fallback message (natural, no forced "Hi")
+            return `Quick follow-up—saw your stuff on ${lead.company || 'their company'}. Would be good to connect when you have a sec.`;
         }
     }
 
     /**
-     * Generates a thought-leadership LinkedIn post from an article
+     * Generates a thought-leadership LinkedIn post from an article.
+     * @param {Object} article - { original_title, source_url, summary }
+     * @param {Object} [options] - Optional content-engine context: { persona, industry, objective, ctaText }
      */
-    static async generateThoughtLeadershipPost(article) {
+    static async generateThoughtLeadershipPost(article, options = null) {
         try {
             if (!this.isConfigured()) {
                 console.warn(`⚠️ ${AI_PROVIDER.toUpperCase()} not configured, using template`);
                 return `Interesting article: ${article.original_title}\n\n${article.source_url}\n\n#Leadership #Industry`;
             }
 
-            const prompt = `Create a thought-leadership LinkedIn post based on this article.
+            const persona = options?.persona || '';
+            const industry = options?.industry || '';
+            const objective = options?.objective || 'thought_leadership';
+            const ctaText = options?.ctaText || '';
 
-Article Title: ${article.original_title}
-Article URL: ${article.source_url}
-${article.summary ? `Summary: ${article.summary}` : ''}
+            let contextBlock = '';
+            if (persona || industry || objective) {
+                contextBlock = '\n\nAudience/context (write in this voice, do not list these):';
+                if (persona) contextBlock += ` Persona: ${persona}.`;
+                if (industry) contextBlock += ` Industry: ${industry}.`;
+                if (objective) contextBlock += ` Objective: ${objective}.`;
+            }
 
-Requirements:
-- Share your perspective on the topic
-- Explain what it means for the industry
-- Discuss potential impact or implications
-- Professional yet engaging tone
-- 200-300 words
-- Include 3-5 relevant hashtags at the end
-- Make it feel authentic and personal, not robotic
-- Start with a hook that grabs attention
+            const prompt = `Write a LinkedIn post that sounds like a real person sharing their perspective—not a brand or a bot. You have actually read/understood the source and have a genuine point of view.
 
-Generate ONLY the post text, no quotes or extra formatting.`;
+Article/source: ${article.original_title}
+${article.source_url ? `URL: ${article.source_url}` : ''}
+${article.summary ? `Summary: ${article.summary}` : ''}${contextBlock}
 
-            return await this.callAI(prompt, 500, 0.8);
+HUMAN VOICE RULES:
+- Write as yourself: one professional with a clear opinion. Use "I" and concrete points. No corporate filler ("leverage", "synergy", "drive value", "game-changing").
+- Vary structure: don't use the same opening every time (e.g. avoid always "I've been thinking about..."). Surprise the reader with a sharp first line when possible.
+- Be specific about the topic—reference real details from the article/source, not vague "recent developments."
+- 200-300 words. End with 3-5 relevant hashtags. No emojis in the body unless they fit naturally.
+${ctaText ? `\nInclude this CTA naturally in the post (weave it in, don't paste at the end): ${ctaText}` : ''}
+
+Output ONLY the post text. No quotes or extra formatting.`;
+
+            return await this.callAI(prompt, 500, 0.85);
         } catch (error) {
             console.error('❌ AI Post Generation Error:', error.message);
             return `Interesting insights from this article: ${article.original_title}\n\nRead more: ${article.source_url}\n\n#Industry #Insights`;
@@ -541,9 +556,9 @@ Generate ONLY the post text, no quotes or extra formatting.`;
             if (!message || message.trim().length === 0) {
                 console.warn(`⚠️ Generated empty message, using fallback`);
                 if (stepType === 'connection_request') {
-                    message = `Hi ${lead.first_name}, I'd love to connect and explore potential synergies between our work.`;
+                    message = `Your work at ${lead.company || 'your company'} caught my eye—would like to connect.`;
                 } else {
-                    message = `Hi ${lead.first_name}, I hope this message finds you well. I'd love to connect and discuss how we might work together.`;
+                    message = `Quick follow-up—would be good to connect when you have a sec.`;
                 }
             }
 
@@ -558,9 +573,9 @@ Generate ONLY the post text, no quotes or extra formatting.`;
             const lead = leadResult.rows[0];
 
             if (stepType === 'connection_request') {
-                return `Hi ${lead?.first_name || 'there'}, I'd love to connect and explore potential synergies between our work.`;
+                return `Your work at ${lead?.company || 'their company'} caught my eye—would like to connect.`;
             } else {
-                return `Hi ${lead?.first_name || 'there'}, I hope this message finds you well. I'd love to connect and discuss how we might work together.`;
+                return `Quick follow-up—would be good to connect when you have a sec.`;
             }
         }
     }
@@ -571,32 +586,20 @@ Generate ONLY the post text, no quotes or extra formatting.`;
     static async generateEmailFailover(lead, enrichment = null, linkedinMessages = []) {
         try {
             if (!this.isConfigured()) {
-                return `Hi ${lead.first_name},\n\nI tried reaching out on LinkedIn but wanted to follow up via email.\n\nBest regards`;
+                return `Saw your profile—would be good to connect. Quick note via email since LinkedIn's been quiet. Best`;
             }
 
-            const prompt = `Generate a professional email for LinkedIn failover.
+            const prompt = `You're a real person following up via email after LinkedIn. You know their name, role, company. Write a short email that feels like a human wrote it.
 
-Lead Information:
-- Name: ${lead.full_name}
-- Title: ${lead.title || 'N/A'}
-- Company: ${lead.company || 'N/A'}
+Lead: ${lead.full_name}, ${lead.title || 'N/A'} at ${lead.company || 'N/A'}
+Context: You tried LinkedIn first; no reply. This is a brief, respectful email.
 
-Context: We connected on LinkedIn but haven't received a response. This is a respectful follow-up via email.
+RULES: Sound like one person emailing another. One concrete detail about them so it's not bulk. Don't start with "I hope this finds you well" or "I wanted to follow up"—start with something specific or direct. 150-200 words. Clear CTA. No emojis. Output ONLY the email body.`;
 
-Requirements:
-- Professional email format
-- Acknowledge the LinkedIn connection attempt
-- Provide value or insight
-- Clear call-to-action
-- Respectful of their time
-- 150-200 words
-
-Generate ONLY the email body, no subject line.`;
-
-            return await this.callAI(prompt, 300, 0.7);
+            return await this.callAI(prompt, 300, 0.85);
         } catch (error) {
             console.error('❌ AI Email Generation Error:', error.message);
-            return `Hi ${lead.first_name},\n\nI tried reaching out on LinkedIn but wanted to follow up via email.\n\nBest regards`;
+            return `Saw your profile—would be good to connect. Quick note via email since LinkedIn's been quiet. Best`;
         }
     }
 
@@ -617,30 +620,17 @@ Company: ${lead.company || 'Unknown'}`;
                 }
             }
 
-            const prompt = `You are an expert at writing personalized, professional outreach emails.
+            const prompt = `You're a real person writing a cold email to ${lead.first_name}. You know specific things about them. Write something that could only be for this person.
 
 ${context}
+${HUMAN_WRITER_BLOCK}
 
-Task: Write a compelling email to ${lead.first_name} that will get a response.
+RULES: One CONCRETE detail from their profile. Don't start with "I came across your profile" or "I was impressed by"—start with something specific or a question. Conversational. 120-180 words. One CTA. Mention you found their contact and wanted to reach out. ${template ? `Style (don't copy): ${template}` : ''} Output ONLY the email body.`;
 
-${template ? `Style guide/Template:\n${template}\n` : ''}
-
-Requirements:
-- Start with a personalized hook based on their background
-- Show genuine interest in their work
-- Provide clear value proposition
-- Include a specific call-to-action
-- Keep it conversational and human
-- 120-180 words max
-- Do NOT sound like a sales pitch
-- Mention that you found their contact info and wanted to reach out directly
-
-Generate ONLY the email body (no subject line).`;
-
-            return await this.callAI(prompt, 300, 0.8);
+            return await this.callAI(prompt, 300, 0.88);
         } catch (error) {
             console.error('❌ AI Email Outreach Generation Error:', error.message);
-            return `Hi ${lead.first_name},\n\nI came across your profile and was impressed by your work at ${lead.company || 'your company'}. I'd love to connect and explore potential collaboration.\n\nWould you be open to a quick chat?\n\nBest regards`;
+            return `Saw your work at ${lead.company || 'your company'}—would be good to connect. Open to a quick chat when you're free. Best`;
         }
     }
 
@@ -660,7 +650,7 @@ Generate ONLY the email body (no subject line).`;
         try {
             if (!this.isConfigured()) {
                 const fallbackSubject = `Quick thought for ${lead.first_name}`;
-                const fallbackBody = `Hi ${lead.first_name},\n\nI came across your profile and was impressed by your work at ${lead.company || 'your company'}. I'd love to connect and explore potential collaboration.\n\nWould you be open to a quick chat?\n\nBest regards`;
+                const fallbackBody = `Saw your work at ${lead.company || 'your company'}—would be good to connect.\n\n[Add your note here.]\n\nBest`;
                 return { subject: fallbackSubject, body: fallbackBody };
             }
 
@@ -698,29 +688,23 @@ Generate ONLY the email body (no subject line).`;
                 long: 'Body: 280-400 words. Subject: descriptive, under 100 characters.'
             };
 
-            const prompt = `You are writing a personalized outreach EMAIL (Gmail) to a prospect. Generate a complete draft.
+            const prompt = `You're a real person writing an email to a prospect. You know specific things about them. Write something that could only be for THIS person. Natural—not a template.
 
-Lead:
-- Name: ${lead.full_name}
-- Title: ${lead.title || 'N/A'}
-- Company: ${lead.company || 'N/A'}${enrichmentContext}${campaignContext}
+Lead: ${lead.full_name} | ${lead.title || 'N/A'} | ${lead.company || 'N/A'}${enrichmentContext}${campaignContext}
+${HUMAN_WRITER_BLOCK}
 
-Requirements:
-- TONE: ${toneMap[tone] || toneMap.professional}
-- LENGTH: ${lengthMap[length] || lengthMap.medium}
-- FOCUS: Reference specific details from their profile/company when possible. ${focus === 'recent_post' ? 'Mention recent post/activity if available.' : focus === 'company' ? 'Focus on their company and role.' : 'Balanced personalization.'}
+OPENING: Do NOT default to "Hi [Name],". Do NOT start with "That/the latest product update you shared" or "That/the post you shared" or any "[That/The] [thing] you shared". Use a UNIQUE first line: a question, a direct observation (different wording), or dive in. Use "Hey ${lead.first_name}" or "Hi ${lead.first_name}" only if it fits. Vary your closing too—different sign-off or CTA per message.
+
+REQUIREMENTS: TONE ${toneMap[tone] || toneMap.professional} | LENGTH ${lengthMap[length] || lengthMap.medium}. One CONCRETE detail from their profile (weave it in, don't open with "the thing you shared"). Campaign context only if natural.
 
 OUTPUT FORMAT (strict):
-1. First line must be exactly: SUBJECT: <your subject line>
-2. Then one blank line.
-3. Then the full email body. Start with a greeting (e.g. Hi ${lead.first_name},). Use proper paragraphs. Sign off professionally (e.g. Best regards).
-- No quotes around subject or body.
-- No "Subject:" in the body text—only in the first line as SUBJECT: ...
-- Body should be longer and more substantive than a short LinkedIn message (multiple paragraphs, 150-350 words depending on length).`;
+1. First line: SUBJECT: <your subject line>
+2. Blank line.
+3. Full email body. Any greeting you choose (or none). Paragraphs. Sign off naturally (e.g. Best, Thanks, —[name]). No "Subject:" in body—only SUBJECT: on first line. Body 150-350 words depending on length.`;
 
             console.log(`   📡 Calling ${AI_PROVIDER.toUpperCase()} (Gmail draft, tone=${tone}, length=${length})...`);
             const maxTokens = length === 'long' ? 650 : length === 'short' ? 350 : 500;
-            const raw = await this.callAI(prompt, maxTokens, 0.8);
+            const raw = await this.callAI(prompt, maxTokens, 0.9);
             if (!raw || typeof raw !== 'string') {
                 throw new Error('Invalid AI response');
             }
@@ -739,7 +723,7 @@ OUTPUT FORMAT (strict):
             console.error('❌ AI Gmail Draft Error:', error.message);
             return {
                 subject: `Quick thought for ${lead.first_name}`,
-                body: `Hi ${lead.first_name},\n\nI came across your profile and was impressed by your work at ${lead.company || 'your company'}. I'd love to connect and explore potential collaboration.\n\nWould you be open to a quick chat?\n\nBest regards`
+                body: `Saw your work at ${lead.company || 'your company'} and wanted to reach out.\n\n[Add your note here—keep it short and natural.]\n\nBest`
             };
         }
     }
@@ -749,26 +733,14 @@ OUTPUT FORMAT (strict):
      */
     async generateSMSOutreach(lead, enrichment = null) {
         try {
-            const prompt = `Generate a short, personalized SMS message for ${lead.first_name} ${lead.last_name}, ${lead.title || 'professional'} at ${lead.company || 'their company'}.
-
-Requirements:
-- MAX 160 characters (strict limit)
-- Friendly, not salesy
-- Mention LinkedIn connection
-- Clear CTA
-- Professional but casual tone
-
-Example good SMS:
-"Hi John! Connected on LinkedIn - loved your recent post on AI. Quick q: open to chat about XYZ? -Mike"
-
-Generate ONLY the SMS text, nothing else.`;
+            const prompt = `Short SMS to ${lead.first_name} (${lead.title || 'pro'} at ${lead.company || 'their company'}). Reference something specific about them. Max 160 chars. Casual, not salesy. Mention LinkedIn. One clear ask. Output ONLY the SMS text.`;
 
             const result = await this.callAI(prompt, 50, 0.9);
             // Ensure it's under 160 chars
             return result.substring(0, 160);
         } catch (error) {
             console.error('❌ AI SMS Generation Error:', error.message);
-            return `Hi ${lead.first_name}! Saw your LinkedIn profile. Would love to connect. Can we chat?`;
+            return `Saw your profile—would be good to connect. Free for a quick chat?`;
         }
     }
 }

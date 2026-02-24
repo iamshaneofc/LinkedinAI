@@ -178,12 +178,12 @@ async function sendConnectionRequest() {
                 }
                 
                 if (personalizedParts.length > 0) {
-                    message = `Hi ${firstName}, ${personalizedParts.join(' and ')} caught my attention. I'd love to connect and explore potential synergies between our work.`;
+                    message = `${personalizedParts.join(' and ')} caught my attention—would be great to connect.`;
                 } else {
-                    message = `Hi ${firstName}, I came across your profile and was impressed by your professional background. I'd love to connect and explore how we might collaborate.`;
+                    message = `Your work at ${lead.company || 'your company'} caught my eye—would like to connect.`;
                 }
             } else {
-                message = `Hi ${lead.first_name || 'there'}, I hope this message finds you well. I came across your profile and would love to connect to explore potential opportunities for collaboration.`;
+                message = `Saw your profile—would be good to connect when you have a sec.`;
             }
             console.log(`   📝 Using fallback message (${message.length} characters)`);
         }

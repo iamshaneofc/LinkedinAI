@@ -1197,19 +1197,18 @@ export async function bulkEnrichAndGenerate(req, res) {
                         }
                     } catch (aiError) {
                         console.error(`❌ AI generation failed for lead ${lead.id}:`, aiError.message);
-                        // Use enrichment data to create a personalized fallback
                         if (enrichmentData && enrichmentData.bio) {
-                            const bioSnippet = enrichmentData.bio.substring(0, 100);
-                            personalizedMessage = `Hi ${lead.first_name}, I noticed your background in ${lead.title || 'your field'}. ${bioSnippet} I'd love to connect and explore how we might work together.`;
+                            const bioSnippet = enrichmentData.bio.substring(0, 80);
+                            personalizedMessage = `That bit in your profile about ${bioSnippet}... resonated. Would be great to connect.`;
                         } else {
-                            personalizedMessage = `Hi ${lead.first_name}, I hope this message finds you well. I'd love to connect and discuss how we might work together.`;
+                            personalizedMessage = `Your work at ${lead.company || 'your company'} caught my eye—would like to connect.`;
                         }
                         console.log(`   ⚠️  Using fallback template message`);
                     }
 
                     if (!personalizedMessage || personalizedMessage.trim().length === 0) {
                         console.warn(`   ⚠️  Generated empty message, using fallback`);
-                        personalizedMessage = `Hi ${lead.first_name}, I hope this message finds you well. I'd love to connect and discuss how we might work together.`;
+                        personalizedMessage = `Your work at ${lead.company || 'your company'} caught my eye—would like to connect.`;
                     }
 
                     console.log(`   📝 Message generated (${personalizedMessage.length} chars)`);
@@ -1441,7 +1440,7 @@ export async function generateGmailDrafts(req, res) {
                     console.error(`Gmail draft failed for lead ${lead.id}:`, err.message);
                     draft = {
                         subject: `Quick thought for ${lead.first_name}`,
-                        body: `Hi ${lead.first_name},\n\nI came across your profile and would like to connect.\n\nBest regards`
+                        body: `Saw your work at ${lead.company || 'your company'}—would be good to connect.\n\nBest`
                     };
                 }
                 const content = JSON.stringify({ subject: draft.subject, body: draft.body });
@@ -1476,7 +1475,7 @@ export async function generateGmailDrafts(req, res) {
                         );
                     }
                     if (!personalizedMessage || personalizedMessage.trim().length === 0) {
-                        personalizedMessage = `Hi ${lead.first_name}, I hope this message finds you well. I'd love to connect and discuss how we might work together.`;
+                        personalizedMessage = `Your work at ${lead.company || 'your company'} caught my eye—would like to connect.`;
                     }
                     await ApprovalService.addToQueue(campaignId, lead.id, linkedinStepType, personalizedMessage);
                     linkedinGenerated++;
