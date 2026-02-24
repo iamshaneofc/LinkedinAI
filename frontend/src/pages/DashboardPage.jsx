@@ -309,6 +309,7 @@ export default function DashboardPage() {
     {
       id: "primary",
       name: "Primary",
+      qualification: "High relevance match",
       value: lq.primary,
       fill: "#10b981",
       desc: "Highest relevance matches",
@@ -320,6 +321,7 @@ export default function DashboardPage() {
     {
       id: "secondary",
       name: "Secondary",
+      qualification: "Medium relevance match",
       value: lq.secondary,
       fill: "#3b82f6",
       desc: "Medium relevance matches",
@@ -331,6 +333,7 @@ export default function DashboardPage() {
     {
       id: "tertiary",
       name: "Tertiary",
+      qualification: "Low relevance match",
       value: lq.tertiary,
       fill: "#94a3b8",
       desc: "Lower relevance matches",
@@ -774,6 +777,9 @@ export default function DashboardPage() {
                             <div className="flex items-center gap-3 mb-1">
                               <p className="text-base font-semibold text-foreground group-hover:text-primary transition-colors flex items-center gap-2">
                                 {item.name}
+                                <span className="text-muted-foreground font-normal text-sm">
+                                  — {item.qualification}
+                                </span>
                                 {idx === 0 && (
                                   <Sparkles className="h-4 w-4 text-yellow-500 fill-yellow-500/20" />
                                 )}

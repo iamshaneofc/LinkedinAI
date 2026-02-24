@@ -713,6 +713,17 @@ function ItemDetailModal({ item, ctaTemplates, onClose, onUpdated, onDeleted }) 
 
                 {/* Action buttons (always visible) */}
                 <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
+                    {['IDEA', 'DRAFT', 'REVIEW'].includes((item.status || '').toUpperCase()) && (
+                        <Button
+                            size="sm"
+                            onClick={() => transition('APPROVED')}
+                            disabled={transitioning || sending}
+                            className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                        >
+                            <CheckCircle2 className="w-3 h-3" />
+                            Approve
+                        </Button>
+                    )}
                     {nextStates.map(s => {
                         const ns = stageFor(s);
                         const Icon = ns.icon;
@@ -1026,116 +1037,121 @@ export default function ContentEnginePage() {
             <div className="absolute inset-0 -z-10 bg-gradient-to-b from-background/95 via-background/90 to-background" />
 
             <div className="flex flex-col h-full min-h-0 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                {/* ── Header: Lamp-style gradient, refined typography ── */}
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 pb-6 border-b border-border/30">
-                    <div className="flex items-center gap-4">
-                        <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/20 via-purple-500/15 to-violet-500/20 border border-indigo-500/25 shadow-lg shadow-indigo-500/10 overflow-hidden">
-                            <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent" />
-                            <Newspaper className="relative w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+                {/* ── Header: Title + grouped actions ── */}
+                <header className="shrink-0 space-y-4 mb-4">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-4 min-w-0">
+                            <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/20 via-purple-500/15 to-violet-500/20 border border-indigo-500/25 shadow-md overflow-hidden">
+                                <Newspaper className="relative w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                            </div>
+                            <div className="min-w-0">
+                                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground truncate">
+                                    Content Engine
+                                </h1>
+                                <p className="text-muted-foreground text-xs sm:text-sm mt-0.5 truncate">Create → Refine → Approve → Schedule → Publish</p>
+                            </div>
                         </div>
-                        <div>
-                            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
-                                Content Engine
-                            </h1>
-                            <p className="text-muted-foreground text-sm mt-0.5">Create → Refine → Approve → Schedule → Publish</p>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className={`gap-1.5 rounded-xl border ${showFilters ? 'bg-primary/10 text-primary border-primary/30' : 'border-transparent text-muted-foreground hover:bg-muted/50'}`}
-                            onClick={() => setShowFilters(!showFilters)}
-                        >
-                            <Filter className="w-4 h-4" /> Filters
-                        </Button>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            className="gap-1.5 rounded-xl border-border/50 hover:border-primary/30 hover:bg-primary/5"
-                            onClick={() => setActiveTab(t => t === 'board' ? 'analytics' : 'board')}
-                        >
-                            {activeTab === 'board' ? <><BarChart2 className="w-4 h-4" /> Analytics</> : <><Rss className="w-4 h-4" /> Board</>}
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-1.5 rounded-xl border-border/50 hover:border-amber-500/30 hover:bg-amber-500/5 text-muted-foreground hover:text-amber-400"
-                            onClick={() => setShowCtaManagerModal(true)}
-                            title="Manage CTA Templates"
-                        >
-                            <Tag className="w-4 h-4" /> CTAs
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-1.5 rounded-xl border-border/50 hover:border-emerald-500/30 hover:bg-emerald-500/5 text-muted-foreground hover:text-emerald-400"
-                            onClick={() => setShowManualCreateModal(true)}
-                            title="Add item manually"
-                        >
-                            <Plus className="w-4 h-4" /> Manual
-                        </Button>
-                        <Button
-                            size="sm"
-                            className="gap-1.5 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-violet-600 hover:from-indigo-500 hover:via-purple-500 hover:to-violet-500 text-white shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all duration-300 border-0"
-                            onClick={() => setShowGenerateModal(true)}
-                        >
-                            <Sparkles className="w-4 h-4" /> Generate Idea
-                        </Button>
-                    </div>
-                </div>
-
-                {/* ── Pipeline filter: horizontal stepper style ── */}
-                <div className="flex items-center gap-0 mb-6 overflow-x-auto pb-1">
-                    <button
-                        onClick={() => setFilterStatus('')}
-                        className={`shrink-0 px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-200 ${!filterStatus ? 'bg-foreground text-background shadow-md' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}
-                    >
-                        All ({items.length})
-                    </button>
-                    <div className="w-px h-5 bg-border/60 shrink-0 mx-1" />
-                    {PIPELINE_STAGES.map((s, idx) => {
-                        const count = items.filter(i => i.status === s.key).length;
-                        const isActive = filterStatus === s.key;
-                        return (
-                            <React.Fragment key={s.key}>
-                                {idx > 0 && <div className="w-3 h-px bg-border/50 shrink-0" aria-hidden />}
-                                <button
-                                    onClick={() => setFilterStatus(isActive ? '' : s.key)}
-                                    className={`shrink-0 px-4 py-2 rounded-xl text-xs font-medium transition-all duration-200 flex items-center gap-1.5 ${isActive ? 'text-white shadow-md' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}
-                                    style={isActive ? { backgroundColor: s.color } : {}}
+                        <div className="flex flex-wrap items-center gap-2 sm:gap-2">
+                            <div className="flex items-center gap-1 rounded-xl border border-border/40 bg-muted/20 p-1" role="group" aria-label="View options">
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className={`h-8 gap-1.5 rounded-lg text-xs ${showFilters ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                                    onClick={() => setShowFilters(!showFilters)}
                                 >
-                                    <span>{s.label}</span>
-                                    {count > 0 && <span className={`tabular-nums ${isActive ? 'opacity-90' : 'text-muted-foreground'}`}>{count}</span>}
-                                </button>
-                            </React.Fragment>
-                        );
-                    })}
-                </div>
+                                    <Filter className="w-3.5 h-3.5" /> Filters
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className={`h-8 gap-1.5 rounded-lg text-xs ${activeTab === 'analytics' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                                    onClick={() => setActiveTab(t => t === 'board' ? 'analytics' : 'board')}
+                                >
+                                    {activeTab === 'board' ? <BarChart2 className="w-3.5 h-3.5" /> : <Rss className="w-3.5 h-3.5" />}
+                                    {activeTab === 'board' ? 'Analytics' : 'Board'}
+                                </Button>
+                            </div>
+                            <div className="flex items-center gap-1 rounded-xl border border-border/40 bg-muted/20 p-1" role="group" aria-label="Add content">
+                                <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-8 gap-1.5 rounded-lg text-xs text-muted-foreground hover:text-amber-400"
+                                    onClick={() => setShowCtaManagerModal(true)}
+                                    title="Manage CTA Templates"
+                                >
+                                    <Tag className="w-3.5 h-3.5" /> CTAs
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-8 gap-1.5 rounded-lg text-xs text-muted-foreground hover:text-emerald-400"
+                                    onClick={() => setShowManualCreateModal(true)}
+                                    title="Add item manually"
+                                >
+                                    <Plus className="w-3.5 h-3.5" /> Manual
+                                </Button>
+                            </div>
+                            <Button
+                                size="sm"
+                                className="h-9 gap-2 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-violet-600 hover:from-indigo-500 hover:via-purple-500 hover:to-violet-500 text-white shadow-md border-0 font-medium"
+                                onClick={() => setShowGenerateModal(true)}
+                            >
+                                <Sparkles className="w-4 h-4" /> Generate Idea
+                            </Button>
+                        </div>
+                    </div>
 
-                {/* ── Main layout: 3-column responsive grid ── */}
-                <div className={`grid grid-cols-1 lg:grid-cols-[220px_1fr${showFilters ? '_220px' : ''}] xl:grid-cols-[240px_1fr${showFilters ? '_240px' : ''}] gap-4 min-h-0 flex-1 overflow-hidden transition-all duration-300`}>
-
-                    {/* ── Left: Sources ── */}
-                    <div className="shrink-0 min-w-0 flex flex-col max-lg:max-h-[200px]">
-                        <Card className="border border-border/40 bg-card/70 backdrop-blur-xl rounded-2xl shadow-sm shadow-black/5 dark:shadow-black/20 h-full overflow-hidden">
-                            <CardHeader className="py-4 px-4 border-b border-border/50">
-                                <div className="flex items-center justify-between">
-                                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                                        <Rss className="w-4 h-4 text-orange-500" />
-                                        Content Sources
-                                    </CardTitle>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-primary/10"
-                                        onClick={() => setShowAddSourceModal(true)}
+                    {/* Pipeline filter bar: contained pill strip */}
+                    <div className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm px-3 py-2">
+                        <div className="flex items-center gap-1 overflow-x-auto scrollbar-thin">
+                            <button
+                                onClick={() => setFilterStatus('')}
+                                className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${!filterStatus ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}
+                            >
+                                All ({items.length})
+                            </button>
+                            <span className="w-px h-4 bg-border/50 shrink-0 mx-0.5" aria-hidden />
+                            {PIPELINE_STAGES.map((s, idx) => {
+                                const count = items.filter(i => i.status === s.key).length;
+                                const isActive = filterStatus === s.key;
+                                return (
+                                    <button
+                                        key={s.key}
+                                        onClick={() => setFilterStatus(isActive ? '' : s.key)}
+                                        className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex items-center gap-1.5 ${isActive ? 'text-white shadow-sm' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}
+                                        style={isActive ? { backgroundColor: s.color } : {}}
                                     >
-                                        <Plus className="w-4 h-4" />
-                                    </Button>
-                                </div>
-                            </CardHeader>
-                            <CardContent className="p-3 space-y-2 overflow-y-auto max-h-[calc(100vh-340px)]">
+                                        <span>{s.label}</span>
+                                        {count > 0 && <span className={`tabular-nums text-[10px] ${isActive ? 'opacity-90' : ''}`}>{count}</span>}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </header>
+
+                {/* ── Main layout: sidebars + content ── */}
+                <div className={`grid min-h-0 flex-1 gap-4 overflow-hidden transition-all duration-300 ${showFilters ? 'grid-cols-1 lg:grid-cols-[200px_1fr_200px] xl:grid-cols-[220px_1fr_220px]' : 'grid-cols-1 lg:grid-cols-[200px_1fr] xl:grid-cols-[220px_1fr]'}`}>
+
+                    {/* ── Left column: Sources (sidebar on desktop, strip on mobile) ── */}
+                    <div className="min-w-0 min-h-0 flex flex-col gap-4">
+                        {/* Desktop: full sidebar */}
+                        <aside className="hidden lg:flex flex-col min-w-0 min-h-0 flex-1 rounded-xl border border-border/40 bg-card/60 backdrop-blur-sm overflow-hidden">
+                            <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-border/40">
+                                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                                    <Rss className="w-3.5 h-3.5 text-orange-500" />
+                                    Sources
+                                </span>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                                    onClick={() => setShowAddSourceModal(true)}
+                                >
+                                    <Plus className="w-3.5 h-3.5" />
+                                </Button>
+                            </div>
+                            <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
                                 {sources.length === 0 ? (
                                     <div className="text-center py-8 px-3 rounded-xl border border-dashed border-border/60 bg-muted/20">
                                         <BookOpen className="w-8 h-8 mx-auto text-muted-foreground/50 mb-2" />
@@ -1159,7 +1175,6 @@ export default function ContentEnginePage() {
                                                     <span className="text-xs font-medium truncate flex-1">{s.name}</span>
                                                 </div>
                                                 <div className="flex items-center gap-1.5 shrink-0">
-                                                    {/* Toggle active */}
                                                     <button
                                                         onClick={e => { e.stopPropagation(); toggleSourceActive(s); }}
                                                         className={`w-9 h-5 rounded-full transition-all shrink-0 flex items-center ${s.active ? 'bg-emerald-500 justify-end' : 'bg-muted justify-start'}`}
@@ -1167,7 +1182,6 @@ export default function ContentEnginePage() {
                                                     >
                                                         <span className="w-3.5 h-3.5 rounded-full bg-white shadow-sm m-0.5 transition-transform" />
                                                     </button>
-                                                    {/* Delete source */}
                                                     <button
                                                         onClick={e => { e.stopPropagation(); setDeleteSourceId(s.id); }}
                                                         className="h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground/40 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover/src:opacity-100 transition-all duration-150"
@@ -1186,14 +1200,39 @@ export default function ContentEnginePage() {
                                         </div>
                                     ))
                                 )}
-                            </CardContent>
-                        </Card>
+                            </div>
+                        </aside>
+                        {/* Mobile: compact strip */}
+                        <div className="lg:hidden shrink-0 rounded-xl border border-border/40 bg-card/60 p-3">
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                                    <Rss className="w-3.5 h-3.5 text-orange-500" /> Sources
+                                </span>
+                                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setShowAddSourceModal(true)}>
+                                    <Plus className="w-3.5 h-3.5" />
+                                </Button>
+                            </div>
+                            <div className="flex gap-2 overflow-x-auto pb-1">
+                                {sources.length === 0 ? (
+                                    <span className="text-xs text-muted-foreground">No sources</span>
+                                ) : (
+                                    sources.slice(0, 6).map(s => (
+                                        <button
+                                            key={s.id}
+                                            onClick={() => setFilterSource(filterSource === String(s.id) ? '' : String(s.id))}
+                                            className={`shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${filterSource === String(s.id) ? 'border-indigo-500/50 bg-indigo-500/10' : 'border-border/40 hover:bg-muted/30'}`}
+                                        >
+                                            {s.name}
+                                        </button>
+                                    ))
+                                )}
+                            </div>
+                        </div>
                     </div>
 
                     {/* ── Main: Board or Analytics ── */}
-                    <div className="min-w-0 flex-1 flex flex-col overflow-hidden h-full">
-                        <div className="h-full overflow-hidden flex flex-col">
-                            <div className="flex-1 overflow-hidden h-full">
+                    <main className="min-w-0 min-h-0 flex flex-col overflow-hidden rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm">
+                        <div className="flex-1 min-h-0 overflow-hidden flex flex-col p-3 sm:p-4">
                                 {loading ? (
                                     <div className="flex gap-6 overflow-x-hidden h-full">
                                         {PIPELINE_STAGES.map(s => (
@@ -1303,33 +1342,29 @@ export default function ContentEnginePage() {
                                         })}
                                     </div>
                                 )}
-                            </div>
                         </div>
-                    </div>
+                    </main>
 
-                    {/* ── Right: Filters ── */}
+                    {/* ── Right: Filters (when toggled) ── */}
                     {showFilters && (
-                        <div className="shrink-0 min-w-0 flex flex-col max-lg:max-h-[240px] animate-in slide-in-from-right-8 fade-in duration-300">
-                            <Card className="border border-border/40 bg-card/70 backdrop-blur-xl rounded-2xl shadow-sm shadow-black/5 dark:shadow-black/20 h-full overflow-hidden flex flex-col">
-                                <CardHeader className="py-4 px-4 border-b border-border/50">
-                                    <div className="flex items-center justify-between">
-                                        <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                                            <Filter className="w-4 h-4 text-violet-500" />
-                                            Filters
-                                        </CardTitle>
-                                        {hasFilters && (
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-6 text-[10px] text-primary hover:bg-primary/10"
-                                                onClick={() => { setFilterPersona(''); setFilterIndustry(''); setFilterObjective(''); setFilterSource(''); setFilterStatus(''); }}
-                                            >
-                                                Clear
-                                            </Button>
-                                        )}
-                                    </div>
-                                </CardHeader>
-                                <CardContent className="p-3 space-y-3 overflow-y-auto max-h-[calc(100vh-340px)]">
+                        <aside className="shrink-0 min-w-0 flex flex-col min-h-0 rounded-xl border border-border/40 bg-card/60 backdrop-blur-sm overflow-hidden animate-in slide-in-from-right-4 fade-in duration-200">
+                            <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-border/40">
+                                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                                    <Filter className="w-3.5 h-3.5 text-violet-500" />
+                                    Filters
+                                </span>
+                                {hasFilters && (
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 text-[10px] text-primary hover:bg-primary/10 rounded-lg"
+                                        onClick={() => { setFilterPersona(''); setFilterIndustry(''); setFilterObjective(''); setFilterSource(''); setFilterStatus(''); }}
+                                    >
+                                        Clear
+                                    </Button>
+                                )}
+                            </div>
+                            <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
                                     <div className="space-y-3">
                                         <Field label="Persona">
                                             <Input placeholder="Any persona" value={filterPersona} onChange={e => setFilterPersona(e.target.value)} className="h-8 text-xs border-border/60" />
@@ -1363,9 +1398,8 @@ export default function ContentEnginePage() {
                                             })}
                                         </div>
                                     </div>
-                                </CardContent>
-                            </Card>
-                        </div>
+                            </div>
+                        </aside>
                     )}
                 </div>
 
