@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import DashboardLayout from './components/layout/DashboardLayout';
 import DashboardPage from './pages/DashboardPage';
 import LeadsTable from './components/LeadsTable';
+import LeadsPage from './pages/LeadsPage';
 import ConnectionsPage from './pages/ConnectionsPage';
 import ProspectsPage from './pages/ProspectsPage';
 import MyContactsPage from './pages/MyContactsPage';
@@ -25,7 +26,7 @@ function App() {
                 <Route path="connections" element={<ConnectionsPage />} />
                 <Route path="prospects" element={<ProspectsPage />} />
                 <Route path="my-contacts" element={<MyContactsPage />} />
-                <Route path="leads" element={<Navigate to="/connections" replace />} />
+                <Route path="leads" element={<LeadsPage />} />
                 <Route path="leads/:id" element={<LeadDetailPage />} />
                 <Route path="campaigns" element={<CampaignsPage />} />
                 <Route path="campaigns/:id" element={<CampaignDetailPage />} />

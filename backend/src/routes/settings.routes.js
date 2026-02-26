@@ -82,9 +82,9 @@ router.get('/', async (req, res) => {
             ai: {
                 provider: process.env.AI_PROVIDER || 'openai',
                 openaiApiKey: process.env.OPENAI_API_KEY ? maskKey(process.env.OPENAI_API_KEY) : '',
-                openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+                openaiModel: process.env.OPENAI_MODEL || 'gpt-4o',
                 anthropicApiKey: process.env.ANTHROPIC_API_KEY ? maskKey(process.env.ANTHROPIC_API_KEY) : '',
-                claudeModel: process.env.CLAUDE_MODEL || 'claude-3-sonnet-20240229'
+                claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5'
             },
             email: {
                 provider: process.env.EMAIL_PROVIDER || 'sendgrid',
@@ -298,7 +298,7 @@ router.post('/test/claude', async (req, res) => {
                 'content-type': 'application/json'
             },
             body: JSON.stringify({
-                model: process.env.CLAUDE_MODEL || 'claude-3-sonnet-20240229',
+                model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5',
                 max_tokens: 10,
                 messages: [{ role: 'user', content: 'Hi' }]
             })

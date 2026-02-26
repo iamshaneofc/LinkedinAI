@@ -58,10 +58,33 @@ const SettingsPage = () => {
   });
   const [brandingSaving, setBrandingSaving] = useState(false);
 
-  // AI Model selection state
-  // 'openai' = GPT-4o (Model 1) | 'claude' = Claude 3.5 (Model 2)
+  // Best/recommended models used as defaults across the app
+  const DEFAULT_OPENAI_MODEL = 'gpt-4o';
+  const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-5';
+
+  // AI Model selection state — best model selected by default for both
   const [aiProvider, setAiProvider] = useState('openai');
+  const [openaiModel, setOpenaiModel] = useState(DEFAULT_OPENAI_MODEL);
+  const [claudeModel, setClaudeModel] = useState(DEFAULT_CLAUDE_MODEL);
   const [aiModelSaving, setAiModelSaving] = useState(false);
+
+  // Model options for dropdowns (first = recommended/best)
+  const OPENAI_MODELS = [
+    { value: 'gpt-4o', label: 'GPT-4o (recommended)' },
+    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+    { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+    { value: 'gpt-4', label: 'GPT-4' },
+  ];
+  const CLAUDE_MODELS = [
+    { value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (recommended)' },
+    { value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet' },
+    { value: 'claude-3-opus-20240229', label: 'Claude 3 Opus' },
+    { value: 'claude-3-sonnet-20240229', label: 'Claude 3 Sonnet' },
+  ];
+
+  // Dynamic labels for cards (strip " (recommended)" for display)
+  const openaiModelLabel = OPENAI_MODELS.find((m) => m.value === openaiModel)?.label?.replace(/\s*\(recommended\)$/i, '')?.trim() || openaiModel;
+  const claudeModelLabel = CLAUDE_MODELS.find((m) => m.value === claudeModel)?.label?.replace(/\s*\(recommended\)$/i, '')?.trim() || claudeModel;
 
   const [settings, setSettings] = useState({
     pbApiKey: "",
@@ -150,12 +173,14 @@ const SettingsPage = () => {
       .catch(() => { });
   }, []);
 
-  // Load current AI provider from backend
+  // Load current AI provider and model from backend (fall back to best model if missing)
   useEffect(() => {
     axios.get("/api/settings")
       .then((r) => {
-        if (r.data?.ai?.provider) {
-          setAiProvider(r.data.ai.provider);
+        if (r.data?.ai) {
+          if (r.data.ai.provider) setAiProvider(r.data.ai.provider);
+          setOpenaiModel(r.data.ai.openaiModel && OPENAI_MODELS.some((m) => m.value === r.data.ai.openaiModel) ? r.data.ai.openaiModel : DEFAULT_OPENAI_MODEL);
+          setClaudeModel(r.data.ai.claudeModel && CLAUDE_MODELS.some((m) => m.value === r.data.ai.claudeModel) ? r.data.ai.claudeModel : DEFAULT_CLAUDE_MODEL);
         }
       })
       .catch(() => { });
@@ -165,15 +190,35 @@ const SettingsPage = () => {
     setAiModelSaving(true);
     setAiProvider(provider);
     try {
-      await axios.put("/api/settings", { ai: { provider } });
+      await axios.put("/api/settings", { ai: { provider, openaiModel, claudeModel } });
       addToast(
         provider === 'openai'
           ? '✅ Switched to GPT-4o (OpenAI)'
-          : '✅ Switched to Claude 3.5 Sonnet',
+          : '✅ Switched to Claude Sonnet 4.5',
         'success'
       );
     } catch {
       addToast('Failed to save model preference', 'error');
+    } finally {
+      setAiModelSaving(false);
+    }
+  };
+
+  const saveAiModels = async (nextOpenai, nextClaude) => {
+    setAiModelSaving(true);
+    const newOpenai = nextOpenai !== undefined ? nextOpenai : openaiModel;
+    const newClaude = nextClaude !== undefined ? nextClaude : claudeModel;
+    if (nextOpenai !== undefined) setOpenaiModel(newOpenai);
+    if (nextClaude !== undefined) setClaudeModel(newClaude);
+    try {
+      await axios.put("/api/settings", {
+        ai: { provider: aiProvider, openaiModel: newOpenai, claudeModel: newClaude },
+      });
+      addToast('AI model selection saved', 'success');
+    } catch {
+      addToast('Failed to save AI model', 'error');
+      if (nextOpenai !== undefined) setOpenaiModel(openaiModel);
+      if (nextClaude !== undefined) setClaudeModel(claudeModel);
     } finally {
       setAiModelSaving(false);
     }
@@ -900,93 +945,121 @@ const SettingsPage = () => {
             </CardTitle>
             <p className="text-sm text-muted-foreground">
               Select which AI powers your message generation, content ideas, and personalization.
-              The other model acts as automatic fallback.
+              Choose a specific model per provider below. The other provider acts as automatic fallback.
             </p>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
               {/* Model 1 — OpenAI GPT-4o */}
-              <button
-                id="ai-model-openai"
-                onClick={() => saveAiProvider('openai')}
-                disabled={aiModelSaving}
-                className={`relative group flex flex-col gap-3 p-5 rounded-2xl border-2 text-left transition-all duration-300 ${aiProvider === 'openai'
-                  ? 'border-emerald-500 bg-emerald-500/8 shadow-lg shadow-emerald-500/10'
-                  : 'border-border/50 bg-muted/20 hover:border-border hover:bg-muted/40'
-                  }`}
-              >
-                {/* Active badge */}
-                {aiProvider === 'openai' && (
-                  <span className="absolute top-3 right-3 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500 text-white shadow">
-                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                    Active
-                  </span>
-                )}
-                <div className="flex items-center gap-3">
-                  <div className={`flex h-10 w-10 items-center justify-center rounded-xl border ${aiProvider === 'openai'
-                    ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-500'
-                    : 'bg-muted/50 border-border/50 text-muted-foreground'
-                    }`}>
-                    <Sparkles className="w-5 h-5" />
+              <div className="flex flex-col gap-3">
+                <button
+                  id="ai-model-openai"
+                  onClick={() => saveAiProvider('openai')}
+                  disabled={aiModelSaving}
+                  className={`relative group flex flex-col gap-3 p-5 rounded-2xl border-2 text-left transition-all duration-300 ${aiProvider === 'openai'
+                    ? 'border-emerald-500 bg-emerald-500/8 shadow-lg shadow-emerald-500/10'
+                    : 'border-border/50 bg-muted/20 hover:border-border hover:bg-muted/40'
+                    }`}
+                >
+                  {aiProvider === 'openai' && (
+                    <span className="absolute top-3 right-3 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500 text-white shadow">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                      Active
+                    </span>
+                  )}
+                  <div className="flex items-center gap-3">
+                    <div className={`flex h-10 w-10 items-center justify-center rounded-xl border ${aiProvider === 'openai'
+                      ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-500'
+                      : 'bg-muted/50 border-border/50 text-muted-foreground'
+                      }`}>
+                      <Sparkles className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold">Model 1 — {openaiModelLabel}</p>
+                      <p className="text-[11px] text-muted-foreground">OpenAI</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-bold">Model 1 — GPT-4o</p>
-                    <p className="text-[11px] text-muted-foreground">OpenAI · Latest</p>
+                  <div className="space-y-1">
+                    <p className="text-[12px] text-muted-foreground leading-relaxed">
+                      Best for structured, professional outreach. Excellent at following tone and length rules precisely.
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {['Fast', 'Precise', 'Professional'].map(tag => (
+                        <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">{tag}</span>
+                      ))}
+                    </div>
                   </div>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[12px] text-muted-foreground leading-relaxed">
-                    Best for structured, professional outreach. Excellent at following tone and length rules precisely.
-                  </p>
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {['Fast', 'Precise', 'Professional'].map(tag => (
-                      <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">{tag}</span>
+                </button>
+                <div className="flex flex-col gap-1.5 px-1">
+                  <Label className="text-[11px] text-muted-foreground">OpenAI model</Label>
+                  <select
+                    value={openaiModel}
+                    onChange={(e) => saveAiModels(e.target.value, undefined)}
+                    disabled={aiModelSaving}
+                    className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    {OPENAI_MODELS.map((m) => (
+                      <option key={m.value} value={m.value}>{m.label}</option>
                     ))}
-                  </div>
+                  </select>
                 </div>
-              </button>
+              </div>
 
-              {/* Model 2 — Claude 3.5 Sonnet */}
-              <button
-                id="ai-model-claude"
-                onClick={() => saveAiProvider('claude')}
-                disabled={aiModelSaving}
-                className={`relative group flex flex-col gap-3 p-5 rounded-2xl border-2 text-left transition-all duration-300 ${aiProvider === 'claude'
-                  ? 'border-violet-500 bg-violet-500/8 shadow-lg shadow-violet-500/10'
-                  : 'border-border/50 bg-muted/20 hover:border-border hover:bg-muted/40'
-                  }`}
-              >
-                {/* Active badge */}
-                {aiProvider === 'claude' && (
-                  <span className="absolute top-3 right-3 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-violet-500 text-white shadow">
-                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                    Active
-                  </span>
-                )}
-                <div className="flex items-center gap-3">
-                  <div className={`flex h-10 w-10 items-center justify-center rounded-xl border ${aiProvider === 'claude'
-                    ? 'bg-violet-500/15 border-violet-500/30 text-violet-500'
-                    : 'bg-muted/50 border-border/50 text-muted-foreground'
-                    }`}>
-                    <Brain className="w-5 h-5" />
+              {/* Model 2 — Claude Sonnet 4.5 */}
+              <div className="flex flex-col gap-3">
+                <button
+                  id="ai-model-claude"
+                  onClick={() => saveAiProvider('claude')}
+                  disabled={aiModelSaving}
+                  className={`relative group flex flex-col gap-3 p-5 rounded-2xl border-2 text-left transition-all duration-300 ${aiProvider === 'claude'
+                    ? 'border-violet-500 bg-violet-500/8 shadow-lg shadow-violet-500/10'
+                    : 'border-border/50 bg-muted/20 hover:border-border hover:bg-muted/40'
+                    }`}
+                >
+                  {aiProvider === 'claude' && (
+                    <span className="absolute top-3 right-3 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-violet-500 text-white shadow">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                      Active
+                    </span>
+                  )}
+                  <div className="flex items-center gap-3">
+                    <div className={`flex h-10 w-10 items-center justify-center rounded-xl border ${aiProvider === 'claude'
+                      ? 'bg-violet-500/15 border-violet-500/30 text-violet-500'
+                      : 'bg-muted/50 border-border/50 text-muted-foreground'
+                      }`}>
+                      <Brain className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold">Model 2 — {claudeModelLabel}</p>
+                      <p className="text-[11px] text-muted-foreground">Anthropic</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-bold">Model 2 — Claude 3.5</p>
-                    <p className="text-[11px] text-muted-foreground">Anthropic · Sonnet</p>
+                  <div className="space-y-1">
+                    <p className="text-[12px] text-muted-foreground leading-relaxed">
+                      Best for creative, nuanced writing. More human-feeling messages with deep context understanding.
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {['Creative', 'Nuanced', 'Human-like'].map(tag => (
+                        <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20">{tag}</span>
+                      ))}
+                    </div>
                   </div>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[12px] text-muted-foreground leading-relaxed">
-                    Best for creative, nuanced writing. More human-feeling messages with deep context understanding.
-                  </p>
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {['Creative', 'Nuanced', 'Human-like'].map(tag => (
-                      <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20">{tag}</span>
+                </button>
+                <div className="flex flex-col gap-1.5 px-1">
+                  <Label className="text-[11px] text-muted-foreground">Claude model</Label>
+                  <select
+                    value={claudeModel}
+                    onChange={(e) => saveAiModels(undefined, e.target.value)}
+                    disabled={aiModelSaving}
+                    className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    {CLAUDE_MODELS.map((m) => (
+                      <option key={m.value} value={m.value}>{m.label}</option>
                     ))}
-                  </div>
+                  </select>
                 </div>
-              </button>
+              </div>
 
             </div>
             <p className="text-[11px] text-muted-foreground mt-3 flex items-center gap-1.5">
@@ -1191,83 +1264,135 @@ const SettingsPage = () => {
                   Analyze
                 </Button>
               </div>
-              <p className="text-[10px] text-muted-foreground">Analyze suggests Primary tier from your profile. Max 5 per dropdown, no duplicates across tiers.</p>
+              <p className="text-[10px] text-muted-foreground">Analyze fills Primary tier from your profile.</p>
             </div>
-            {["primary", "secondary", "tertiary"].map((tier) => (
-              <div key={tier} className="rounded-lg border border-border/60 p-4 space-y-3">
-                <h4 className="text-sm font-semibold capitalize">{tier} tier</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Titles (comma, max 5)</Label>
-                    <Input
-                      placeholder="e.g. CEO, Director"
-                      value={Array.isArray(preferences.preference_tiers?.[tier]?.titles) ? preferences.preference_tiers[tier].titles.join(", ") : ""}
-                      onChange={(e) => {
-                        const arr = e.target.value.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 5);
-                        setPreferences({
-                          ...preferences,
-                          preference_tiers: {
-                            ...preferences.preference_tiers,
-                            [tier]: { ...(preferences.preference_tiers[tier] || {}), titles: arr },
-                          },
-                        });
-                      }}
-                      className="h-9"
-                    />
+            {(() => {
+              const TITLE_OPTIONS = ["CEO", "CTO", "CFO", "Director", "Manager", "VP", "Founder", "Head of", "Lead", "Engineer", "Analyst", "Consultant", "Specialist"];
+              const INDUSTRY_OPTIONS = [
+                "Technology, Information and Media", "Financial Services", "Professional Services", "Manufacturing", "Retail", "Education",
+                "Hospitals and Health Care", "Marketing & Advertising", "Construction", "Real Estate and Equipment Rental Services", "Other"
+              ];
+              const SIZE_OPTIONS = ["1-10", "11-50", "51-200", "201-500", "500+"];
+              const addPick = (key, tier, value) => {
+                if (!value) return;
+                const t = preferences.preference_tiers?.[tier] || {};
+                const arr = Array.isArray(t[key]) ? t[key] : [];
+                if (arr.length >= 5 || arr.includes(value)) return;
+                setPreferences({
+                  ...preferences,
+                  preference_tiers: {
+                    ...preferences.preference_tiers,
+                    [tier]: { ...t, [key]: [...arr, value] },
+                  },
+                });
+              };
+              const removePick = (key, tier, value) => {
+                const t = preferences.preference_tiers?.[tier] || {};
+                const arr = (Array.isArray(t[key]) ? t[key] : []).filter((v) => v !== value);
+                setPreferences({
+                  ...preferences,
+                  preference_tiers: {
+                    ...preferences.preference_tiers,
+                    [tier]: { ...t, [key]: arr },
+                  },
+                });
+              };
+              const Chip = ({ value, onRemove }) => (
+                <span className="inline-flex items-center gap-0.5 rounded-md bg-muted px-1.5 py-0.5 text-[11px] text-foreground">
+                  {value.length > 16 ? value.slice(0, 16) + "…" : value}
+                  <button type="button" onClick={onRemove} className="hover:text-destructive ml-0.5 rounded p-0.5 leading-none" aria-label="Remove">×</button>
+                </span>
+              );
+              return ["primary", "secondary", "tertiary"].map((tier) => {
+                const t = preferences.preference_tiers?.[tier] || {};
+                const titles = Array.isArray(t.titles) ? t.titles : [];
+                const industries = Array.isArray(t.industries) ? t.industries : [];
+                const sizes = Array.isArray(t.company_sizes) ? t.company_sizes : [];
+                const titleOpts = [...new Set([...TITLE_OPTIONS, ...titles])];
+                const industryOpts = [...new Set([...INDUSTRY_OPTIONS, ...industries])];
+                const sizeOpts = [...new Set([...SIZE_OPTIONS, ...sizes])];
+                const selectClass = "h-8 w-full text-xs rounded-md border border-input bg-background px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-ring";
+                return (
+                  <div key={tier} className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2.5 space-y-2">
+                    <span className="text-xs font-semibold capitalize text-foreground block mb-1">{tier}</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-[11px] text-muted-foreground block">Titles</Label>
+                        <select
+                          value=""
+                          onChange={(e) => { addPick("titles", tier, e.target.value); e.target.value = ""; }}
+                          className={selectClass}
+                        >
+                          <option value="">Add title…</option>
+                          {titleOpts.filter((o) => !titles.includes(o)).map((opt) => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                        {titles.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {titles.map((v) => (
+                              <Chip key={v} value={v} onRemove={() => removePick("titles", tier, v)} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px] text-muted-foreground block">Industries</Label>
+                        <select
+                          value=""
+                          onChange={(e) => { addPick("industries", tier, e.target.value); e.target.value = ""; }}
+                          className={selectClass}
+                        >
+                          <option value="">Add industry…</option>
+                          {industryOpts.filter((o) => !industries.includes(o)).map((opt) => (
+                            <option key={opt} value={opt}>{opt.length > 28 ? opt.slice(0, 28) + "…" : opt}</option>
+                          ))}
+                        </select>
+                        {industries.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {industries.map((v) => (
+                              <Chip key={v} value={v} onRemove={() => removePick("industries", tier, v)} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px] text-muted-foreground block">Size</Label>
+                        <select
+                          value=""
+                          onChange={(e) => { addPick("company_sizes", tier, e.target.value); e.target.value = ""; }}
+                          className={selectClass}
+                        >
+                          <option value="">Add size…</option>
+                          {sizeOpts.filter((o) => !sizes.includes(o)).map((opt) => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                        {sizes.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {sizes.map((v) => (
+                              <Chip key={v} value={v} onRemove={() => removePick("company_sizes", tier, v)} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Industries (comma, max 5)</Label>
-                    <Input
-                      placeholder="e.g. Technology, SaaS"
-                      value={Array.isArray(preferences.preference_tiers?.[tier]?.industries) ? preferences.preference_tiers[tier].industries.join(", ") : ""}
-                      onChange={(e) => {
-                        const arr = e.target.value.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 5);
-                        setPreferences({
-                          ...preferences,
-                          preference_tiers: {
-                            ...preferences.preference_tiers,
-                            [tier]: { ...(preferences.preference_tiers[tier] || {}), industries: arr },
-                          },
-                        });
-                      }}
-                      className="h-9"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Company sizes (comma, max 5)</Label>
-                    <Input
-                      placeholder="e.g. 1-10, 51-200"
-                      value={Array.isArray(preferences.preference_tiers?.[tier]?.company_sizes) ? preferences.preference_tiers[tier].company_sizes.join(", ") : ""}
-                      onChange={(e) => {
-                        const arr = e.target.value.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 5);
-                        setPreferences({
-                          ...preferences,
-                          preference_tiers: {
-                            ...preferences.preference_tiers,
-                            [tier]: { ...(preferences.preference_tiers[tier] || {}), company_sizes: arr },
-                          },
-                        });
-                      }}
-                      className="h-9"
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-            <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">Secondary → My Contacts threshold (score ≥)</Label>
+                );
+              });
+            })()}
+            <div className="flex items-center gap-2">
+              <Label className="text-[11px] text-muted-foreground shrink-0">My Contacts min score</Label>
               <Input
                 type="number"
                 min={0}
                 max={200}
                 value={preferences.secondary_priority_threshold ?? 70}
                 onChange={(e) => setPreferences({ ...preferences, secondary_priority_threshold: parseInt(e.target.value, 10) || 70 })}
-                className="w-24 h-9"
+                className="w-14 h-8 text-xs"
               />
             </div>
-            <p className="text-[10px] text-muted-foreground">
-              Tiered criteria score leads. Primary match = highest; Secondary with score ≥ threshold = My Contacts. Rescore runs on save.
-            </p>
+            <p className="text-[10px] text-muted-foreground">Rescore runs on save.</p>
           </CardContent>
           <CardFooter>
             <Button onClick={savePreferences} disabled={preferencesSaving} className="gap-2">

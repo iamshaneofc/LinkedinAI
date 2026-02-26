@@ -7,6 +7,7 @@ import {
     duplicateCampaign,
     addLeadsToCampaign,
     launchCampaign,
+    getLaunchesToday,
     deleteCampaign,
     addSequenceStep,
     updateSequenceStep,
@@ -25,6 +26,7 @@ import {
 const router = Router();
 
 router.get('/', getCampaigns);
+router.get('/launches-today', getLaunchesToday);
 router.get('/templates', getCampaignTemplates);
 router.post('/estimate-audience', estimateAudience);
 router.post('/', createCampaign);

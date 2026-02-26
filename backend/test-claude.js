@@ -11,7 +11,7 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 console.log('\n🧪 Testing Claude API Integration...\n');
 console.log(`AI Provider: ${AI_PROVIDER}`);
 console.log(`Anthropic API Key: ${ANTHROPIC_API_KEY ? ANTHROPIC_API_KEY.substring(0, 12) + '...' : 'NOT SET'}`);
-console.log(`Claude Model: ${process.env.CLAUDE_MODEL || 'claude-3-5-sonnet-20241022'}`);
+console.log(`Claude Model: ${process.env.CLAUDE_MODEL || 'claude-sonnet-4-5'}`);
 
 if (AI_PROVIDER === 'claude' && ANTHROPIC_API_KEY) {
     console.log('\n✅ Configuration looks good!');
@@ -23,7 +23,7 @@ if (AI_PROVIDER === 'claude' && ANTHROPIC_API_KEY) {
 
     try {
         const response = await anthropic.messages.create({
-            model: process.env.CLAUDE_MODEL || 'claude-3-5-sonnet-20241022',
+            model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5',
             max_tokens: 50,
             messages: [{
                 role: 'user',

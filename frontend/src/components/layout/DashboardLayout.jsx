@@ -9,9 +9,18 @@ import { TimeFilterProvider } from '../../context/TimeFilterContext';
 const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/', color: '#6366f1' },
     { id: 'search', label: 'Lead Search', icon: Search, path: '/search', color: '#0ea5e9' },
-    { id: 'connections', label: 'Connections', icon: Users, path: '/connections', color: '#10b981' },
-    { id: 'prospects', label: 'Prospects', icon: UserPlus, path: '/prospects', color: '#0ea5e9' },
-    { id: 'my-contacts', label: 'My Contacts', icon: Contact, path: '/my-contacts', color: '#8b5cf6' },
+    {
+        id: 'leads',
+        label: 'Leads',
+        icon: Users,
+        path: '/leads',
+        color: '#10b981',
+        children: [
+            { id: 'my-contacts', label: 'My Contacts', path: '/my-contacts' },
+            { id: 'connections', label: 'Connections', path: '/connections' },
+            { id: 'prospects', label: 'Prospects', path: '/prospects' },
+        ],
+    },
     { id: 'campaigns', label: 'Campaigns', icon: Megaphone, path: '/campaigns', color: '#f59e0b' },
     { id: 'content', label: 'Content Engine', icon: Newspaper, path: '/content', color: '#a855f7' },
     { id: 'settings', label: 'Settings', icon: Settings, path: '/settings', color: '#64748b' },
@@ -170,7 +179,12 @@ export default function DashboardLayout() {
                             <div className="space-y-1">
                                 {navItems.map((item) => {
                                     if (item.children) {
-                                        const isParentActive = location.pathname.startsWith(item.path);
+                                        const isParentActive =
+                                            location.pathname.startsWith(item.path) ||
+                                            (item.children.some((c) => {
+                                                const childPath = c.path.split('?')[0];
+                                                return location.pathname === childPath || location.pathname.startsWith(childPath + '/');
+                                            }));
                                         const isExpanded = expandedItems[item.id] !== undefined ? expandedItems[item.id] : isParentActive;
                                         const activeChildrenCount = item.children.filter((child) => {
                                             const searchParams = new URLSearchParams(location.search);

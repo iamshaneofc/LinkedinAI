@@ -50,6 +50,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import CampaignLeadsTable from '../components/CampaignLeadsTable';
 
 export default function CampaignDetailPage() {
@@ -97,7 +98,24 @@ export default function CampaignDetailPage() {
     // Approval Gate Modal State
     const [showApprovalGateModal, setShowApprovalGateModal] = useState(false);
 
-
+    // Launch limits (2/day, 8/week): block Launch when at limit unless bypass for testing
+    const [launchesToday, setLaunchesToday] = useState({ count: 0, limit: 2, countWeek: 0, limitWeek: 8 });
+    const [limitEnforced, setLimitEnforced] = useState(true);
+    const [showQueuedModal, setShowQueuedModal] = useState(false);
+    const [queuedRunningName, setQueuedRunningName] = useState('');
+    useEffect(() => {
+        try { setLimitEnforced(localStorage.getItem('campaignLimitEnforced') !== 'false'); } catch { }
+    }, []);
+    useEffect(() => {
+        axios.get('/api/campaigns/launches-today').then((r) => {
+            if (r.data && typeof r.data.count === 'number') setLaunchesToday({
+                count: r.data.count,
+                limit: r.data.limit ?? 2,
+                countWeek: typeof r.data.countWeek === 'number' ? r.data.countWeek : 0,
+                limitWeek: r.data.limitWeek ?? 8,
+            });
+        }).catch(() => {});
+    }, [id]);
 
     const [outreachChannel, setOutreachChannel] = useState(null); // 'email' or 'sms'
 
@@ -223,13 +241,13 @@ export default function CampaignDetailPage() {
             return;
         }
 
-        // Warn about OpenAI quota if many leads
+        // Warn about AI (OpenAI/Claude) quota if many leads
         if (leadsToProcess.length > 10) {
             const confirmed = confirm(
                 `⚠️ You are about to generate AI messages for ${leadsToProcess.length} leads.\n\n` +
-                `This will use OpenAI API credits (approximately $0.001-0.002 per message).\n\n` +
+                `This will use your active AI provider (OpenAI or Claude) API credits (approximately $0.001-0.002 per message).\n\n` +
                 `Estimated cost: ~$${(leadsToProcess.length * 0.0015).toFixed(2)}\n\n` +
-                `Continue?`
+                `If your quota is reached, you’ll see a warning and the app will try the other provider. Continue?`
             );
             if (!confirmed) return;
         }
@@ -258,7 +276,16 @@ export default function CampaignDetailPage() {
             });
 
             const message = res.data.message || `Processed ${res.data.results.generated || 0} leads`;
-            addToast(message, res.data.results.failed?.length > 0 ? 'warning' : 'success');
+            const quotaProvider = res.data.results?.quotaExceededProvider;
+            if (quotaProvider) {
+                const providerLabel = quotaProvider === 'claude' ? 'Claude' : 'OpenAI';
+                addToast(
+                    `${providerLabel} API quota reached. ${message} Check billing or try again later.`,
+                    'warning'
+                );
+            } else {
+                addToast(message, res.data.results.failed?.length > 0 ? 'warning' : 'success');
+            }
 
             // Refresh approvals and switch tab
             await fetchApprovals();
@@ -274,14 +301,15 @@ export default function CampaignDetailPage() {
             console.error('❌ Bulk enrich failed:', error);
             let errorMessage = error.response?.data?.error || error.message || 'Failed to enrich and generate messages';
 
-            // Check for quota errors
-            if (errorMessage.includes('quota') || errorMessage.includes('insufficient_quota')) {
-                errorMessage = 'OpenAI API quota exceeded. Please check your OpenAI account billing or wait before trying again.';
+            // Check for quota errors — use provider from response if available
+            const results = error.response?.data?.results;
+            const quotaProvider = results?.quotaExceededProvider;
+            if (errorMessage.includes('quota') || errorMessage.includes('insufficient_quota') || quotaProvider) {
+                const providerLabel = quotaProvider === 'claude' ? 'Claude' : 'OpenAI';
+                errorMessage = `${providerLabel} API quota exceeded. Please check your ${providerLabel} account billing or wait before trying again.`;
             }
 
-            // Show detailed error with results if available
-            if (error.response?.data?.results) {
-                const results = error.response.data.results;
+            if (results) {
                 errorMessage += `\n\nProcessed: ${results.generated || 0}/${results.total || 0} leads`;
                 if (results.failed?.length > 0) {
                     errorMessage += `\nFailed: ${results.failed.length} leads`;
@@ -529,6 +557,8 @@ export default function CampaignDetailPage() {
         }
     };
 
+    const atLaunchLimit = limitEnforced && (launchesToday.count >= launchesToday.limit || launchesToday.countWeek >= launchesToday.limitWeek);
+
     const handleLaunch = async () => {
         // APPROVAL GATE: Check for pending approvals before activating
         const pendingApprovals = approvals.filter(a => a.status === 'pending');
@@ -536,13 +566,29 @@ export default function CampaignDetailPage() {
             setShowApprovalGateModal(true);
             return;
         }
+        if (atLaunchLimit) {
+            addToast(`Daily limit reached (${launchesToday.limit} campaigns/day). You can still create and edit campaigns.`, 'warning');
+            return;
+        }
         try {
-            await axios.post(`/api/campaigns/${id}/launch`);
+            await axios.post(`/api/campaigns/${id}/launch`, limitEnforced ? {} : { bypassLimit: true });
             addToast('Campaign activated. Scheduler will begin processing leads.', 'success');
+            setLaunchesToday((prev) => ({ ...prev, count: prev.count + 1 }));
             fetchCampaignDetails();
         } catch (error) {
             console.error('Launch failed:', error);
-            const errorMsg = error.response?.data?.error || error.message || 'Launch failed. Please check your settings.';
+            const data = error.response?.data;
+            if (data?.code === 'CAMPAIGN_ALREADY_RUNNING') {
+                setQueuedRunningName(data.runningCampaignName || 'A campaign');
+                setShowQueuedModal(true);
+                return;
+            }
+            if (data?.code === 'LAUNCH_LIMIT_REACHED' || data?.code === 'LAUNCH_LIMIT_WEEK_REACHED') {
+                addToast(data.error || 'Launch limit reached.', 'warning');
+                setLaunchesToday((prev) => ({ ...prev, count: data.launchesToday ?? prev.count, countWeek: data.launchesWeek ?? prev.countWeek }));
+                return;
+            }
+            const errorMsg = data?.error || error.message || 'Launch failed. Please check your settings.';
             addToast(`Error: ${errorMsg}`, 'error');
         }
     };
@@ -700,11 +746,20 @@ export default function CampaignDetailPage() {
                         ) : (
                             <Tooltip>
                                 <TooltipTrigger asChild>
-                                    <Button onClick={handleLaunch} size="sm" className="gap-1.5 h-9 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white border-0 shadow-lg shadow-emerald-500/25">
-                                        <Play className="w-3.5 h-3.5" /> Launch
-                                    </Button>
+                                    <span className="inline-flex">
+                                        <Button
+                                            onClick={handleLaunch}
+                                            size="sm"
+                                            disabled={atLaunchLimit}
+                                            className="gap-1.5 h-9 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white border-0 shadow-lg shadow-emerald-500/25 disabled:opacity-60 disabled:pointer-events-none"
+                                        >
+                                            <Play className="w-3.5 h-3.5" /> Launch
+                                        </Button>
+                                    </span>
                                 </TooltipTrigger>
-                                <TooltipContent side="bottom">Launch Campaign</TooltipContent>
+                                <TooltipContent side="bottom">
+                                    {atLaunchLimit ? `Limit reached (${launchesToday.limit}/day or ${launchesToday.limitWeek}/week). You can still create campaigns.` : 'Launch Campaign'}
+                                </TooltipContent>
                             </Tooltip>
                         )}
 
@@ -2068,6 +2123,18 @@ export default function CampaignDetailPage() {
                     </div>
                 </div>
             )}
+
+            {/* Queued modal: another campaign is running */}
+            <Dialog open={showQueuedModal} onOpenChange={setShowQueuedModal}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Please wait</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm text-muted-foreground">
+                        Another campaign (<strong>{queuedRunningName}</strong>) is currently running. This campaign has been queued. Try launching again when the current campaign has finished.
+                    </p>
+                </DialogContent>
+            </Dialog>
 
         </div>
     );

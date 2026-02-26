@@ -55,12 +55,15 @@ const config = {
     apiKey: process.env.HUNTER_API_KEY
   },
 
-  // AI Configuration
+  // AI Configuration (model is read from env on each request in ai.service.js for global Settings sync)
   ai: {
-    provider: 'openai',
+    provider: process.env.AI_PROVIDER || 'openai',
     openai: {
       apiKey: process.env.OPENAI_API_KEY,
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini'
+      model: process.env.OPENAI_MODEL || 'gpt-4o'
+    },
+    claude: {
+      model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5'
     }
   },
 

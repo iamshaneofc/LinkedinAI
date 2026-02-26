@@ -12,6 +12,8 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -79,7 +81,7 @@ function StatCard({ label, value, accent, icon: Icon, suffix = '', pulse = false
 }
 
 // ── Campaign Card ────────────────────────────────────────────────────────────
-function CampaignCard({ campaign, index, onNavigate, onDuplicate, onLaunch, onPause, onResume, onDelete }) {
+function CampaignCard({ campaign, index, onNavigate, onDuplicate, onLaunch, onPause, onResume, onDelete, launchDisabled }) {
     const sc = getStatus(campaign.status);
     const Icon = sc.icon;
     const rate = campaign.response_rate || 0;
@@ -142,8 +144,12 @@ function CampaignCard({ campaign, index, onNavigate, onDuplicate, onLaunch, onPa
                                     <Copy className="h-3.5 w-3.5" /> Duplicate
                                 </DropdownMenuItem>
                                 {campaign.status === 'draft' && (
-                                    <DropdownMenuItem onClick={(e) => onLaunch(campaign.id, e)} className="gap-2 text-xs">
-                                        <Play className="h-3.5 w-3.5" /> Launch
+                                    <DropdownMenuItem
+                                        onClick={(e) => !launchDisabled && onLaunch(campaign.id, e)}
+                                        className={cn("gap-2 text-xs", launchDisabled && "opacity-60 pointer-events-none")}
+                                        disabled={launchDisabled}
+                                    >
+                                        <Play className="h-3.5 w-3.5" /> {launchDisabled ? 'Launch (limit reached)' : 'Launch'}
                                     </DropdownMenuItem>
                                 )}
                                 {campaign.status === 'active' && (
@@ -240,6 +246,23 @@ export default function CampaignsPage() {
     const [filterType, setFilterType] = useState('all');
     const [showCreateModal, setShowCreateModal] = useState(false);
     const { period, month, year } = useTimeFilter();
+    const [launchesToday, setLaunchesToday] = useState({ count: 0, limit: 2, countWeek: 0, limitWeek: 8 });
+    const [limitEnforced, setLimitEnforced] = useState(true);
+    const [showQueuedModal, setShowQueuedModal] = useState(false);
+    const [queuedCampaignName, setQueuedCampaignName] = useState('');
+    useEffect(() => {
+        try { setLimitEnforced(localStorage.getItem('campaignLimitEnforced') !== 'false'); } catch { }
+    }, []);
+    useEffect(() => {
+        axios.get('/api/campaigns/launches-today').then((r) => {
+            if (r.data && typeof r.data.count === 'number') setLaunchesToday({
+                count: r.data.count,
+                limit: r.data.limit ?? 2,
+                countWeek: typeof r.data.countWeek === 'number' ? r.data.countWeek : 0,
+                limitWeek: r.data.limitWeek ?? 8,
+            });
+        }).catch(() => {});
+    }, []);
 
     useEffect(() => { fetchCampaigns(); }, [period, month, year]);
 
@@ -305,13 +328,33 @@ export default function CampaignsPage() {
         } catch (err) { addToast(err.response?.data?.error || 'Failed to duplicate', 'error'); }
     };
 
+    const atLaunchLimit = limitEnforced && (launchesToday.count >= launchesToday.limit || launchesToday.countWeek >= launchesToday.limitWeek);
+
     const launchCampaign = async (id, e) => {
         e.stopPropagation();
+        if (atLaunchLimit) {
+            addToast(`Daily limit reached (${launchesToday.limit} campaigns/day). You can still create campaigns.`, 'warning');
+            return;
+        }
         try {
-            const res = await axios.post(`/api/campaigns/${id}/launch`);
+            const res = await axios.post(`/api/campaigns/${id}/launch`, limitEnforced ? {} : { bypassLimit: true });
             addToast(`Campaign launched! Processed ${res.data.leadsProcessed} leads.`, 'success');
+            setLaunchesToday((prev) => ({ ...prev, count: prev.count + 1 }));
             fetchCampaigns();
-        } catch (err) { addToast(err.response?.data?.error || 'Failed to launch', 'error'); }
+        } catch (err) {
+            const data = err.response?.data;
+            if (data?.code === 'CAMPAIGN_ALREADY_RUNNING') {
+                setQueuedCampaignName(data.runningCampaignName || 'A campaign');
+                setShowQueuedModal(true);
+                return;
+            }
+            if (data?.code === 'LAUNCH_LIMIT_REACHED' || data?.code === 'LAUNCH_LIMIT_WEEK_REACHED') {
+                addToast(data.error || 'Launch limit reached.', 'warning');
+                setLaunchesToday((prev) => ({ ...prev, count: data.launchesToday ?? prev.count, countWeek: data.launchesWeek ?? prev.countWeek }));
+                return;
+            }
+            addToast(data?.error || 'Failed to launch', 'error');
+        }
     };
 
     const pauseCampaign = async (id, e) => {
@@ -372,6 +415,48 @@ export default function CampaignsPage() {
                         </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
+                        {/* Launch limits: label "Limits" + tooltip with day/week rows */}
+                        <div className="flex items-center gap-1.5 shrink-0 h-9">
+                            <TooltipProvider delayDuration={200}>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <span
+                                            className={cn(
+                                                "inline-flex items-center h-8 px-2.5 rounded-lg border text-xs font-medium cursor-default",
+                                                (limitEnforced && (launchesToday.count >= launchesToday.limit || launchesToday.countWeek >= launchesToday.limitWeek))
+                                                    ? "border-red-500/50 bg-red-500/10 text-red-600 dark:text-red-400"
+                                                    : "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                            )}
+                                        >
+                                            Limits
+                                        </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="bottom" className="font-normal">
+                                        <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1.5">Campaign limits</p>
+                                        <div className="space-y-1 text-xs tabular-nums">
+                                            <p>Day &nbsp; {launchesToday.count} / {launchesToday.limit}</p>
+                                            <p>Week {launchesToday.countWeek} / {launchesToday.limitWeek}</p>
+                                        </div>
+                                    </TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const next = !limitEnforced;
+                                    setLimitEnforced(next);
+                                    try { localStorage.setItem('campaignLimitEnforced', next ? 'true' : 'false'); } catch { }
+                                }}
+                                className={cn(
+                                    "h-8 px-2 rounded-lg border text-xs font-medium transition-colors",
+                                    "border-border/60 bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground",
+                                    limitEnforced && "ring-1 ring-primary/30 text-primary"
+                                )}
+                                title={limitEnforced ? "Limits on (2/day, 8/week). Click to turn off for testing." : "Limits off (testing). Click to turn on."}
+                            >
+                                {limitEnforced ? 'On' : 'Off'}
+                            </button>
+                        </div>
                         <Button
                             variant="outline"
                             size="sm"
@@ -556,6 +641,7 @@ export default function CampaignsPage() {
                                     onNavigate={(id) => navigate(`/campaigns/${id}`)}
                                     onDuplicate={duplicateCampaign}
                                     onLaunch={launchCampaign}
+                                    launchDisabled={atLaunchLimit}
                                     onPause={pauseCampaign}
                                     onResume={resumeCampaign}
                                     onDelete={deleteCampaign}
@@ -580,6 +666,18 @@ export default function CampaignsPage() {
                     onCreate={createCampaign}
                 />
             )}
+
+            {/* Queued modal: another campaign is running */}
+            <Dialog open={showQueuedModal} onOpenChange={setShowQueuedModal}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Please wait</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm text-muted-foreground">
+                        Another campaign (<strong>{queuedCampaignName}</strong>) is currently running. This campaign has been queued. Try launching again when the current campaign has finished.
+                    </p>
+                </DialogContent>
+            </Dialog>
 
             <PageGuide pageKey="campaigns" />
         </div>

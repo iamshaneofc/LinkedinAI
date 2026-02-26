@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTimeFilter } from '../context/TimeFilterContext';
 import PageGuide from './PageGuide';
 import axios from 'axios';
-import { Search, MoreVertical, RefreshCw, Linkedin, Trash2, Edit2, Download, Filter, ChevronDown, ChevronUp, Loader2, Sparkles, MapPin, Building2, Briefcase, Target, Database, Eye, Check, X, Mail, Phone, UserPlus, Users, Network, Contact, Upload, FileSpreadsheet } from 'lucide-react';
+import { Search, MoreVertical, RefreshCw, Linkedin, Trash2, Edit2, Download, Filter, ChevronDown, ChevronUp, Loader2, Sparkles, MapPin, Building2, Briefcase, Target, Database, Eye, Check, X, Mail, Phone, UserPlus, Users, Network, Contact, Upload, AlertTriangle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -44,7 +44,7 @@ const QUICK_FILTERS = [
     { id: 'sales_dir', label: 'Sales Directors', preset: { title: 'Sales Director' }, icon: Target }
 ];
 
-export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, showBackToReview = false } = {}) {
+export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, showBackToReview = false, applyDefaultDateRange = true } = {}) {
     const navigate = useNavigate();
     const { addToast } = useToast();
     const [leads, setLeads] = useState([]);
@@ -81,8 +81,9 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
 
     const { period, month, year } = useTimeFilter();
 
-    // Derived default dates from context if URL is empty
+    // Derived default dates from context if URL is empty (skip on "all leads" page so users see full list)
     useEffect(() => {
+        if (!applyDefaultDateRange) return;
         if (!searchParams.get('createdFrom') && !searchParams.get('createdTo')) {
             const now = new Date();
             let start, end;
@@ -113,8 +114,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                 fetchStats({ metaFilters: newFilters });
             }
         }
-    }, [period, month, year, searchParams]);
-    // Multi-select Quick Filters state
+    }, [period, month, year, searchParams, applyDefaultDateRange]);
     const [activeQuickFilters, setActiveQuickFilters] = useState([]);
     const [showMetaFilters, setShowMetaFilters] = useState(false);
     const [expandedSections, setExpandedSections] = useState({
@@ -254,6 +254,8 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
 
     // Add to Campaign Modal State
     const [showCampaignModal, setShowCampaignModal] = useState(false);
+    const [showLeadLimitModal, setShowLeadLimitModal] = useState(false);
+    const [leadLimitModalInfo, setLeadLimitModalInfo] = useState({ currentCount: 0, maxMore: 0 });
     const [isBulkEnrich, setIsBulkEnrich] = useState(false);
     const [selectedCampaignId, setSelectedCampaignId] = useState('');
 
@@ -451,8 +453,16 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             fetchStats();
         } catch (error) {
             console.error('Failed to add leads to campaign:', error);
-            const errorMsg = error.response?.data?.error || error.message || 'Failed to add leads to campaign';
-            addToast(`Error: ${errorMsg}`, 'error');
+            const data = error.response?.data;
+            if (data?.code === 'LEADS_LIMIT_REACHED') {
+                const currentCount = data.currentCount ?? 0;
+                const limit = data.limit ?? 10;
+                setLeadLimitModalInfo({ currentCount, maxMore: Math.max(0, limit - currentCount) });
+                setShowLeadLimitModal(true);
+            } else {
+                const errorMsg = data?.error || error.message || 'Failed to add leads to campaign';
+                addToast(`Error: ${errorMsg}`, 'error');
+            }
         }
     };
 
@@ -870,6 +880,23 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
 
 
 
+    // Count only user-chosen filters; exclude date range so default time context doesn't show as "2 active filters"
+    const getActiveFilterCount = () => {
+        let n = activeQuickFilters.length;
+        if (metaFilters.title?.trim()) n += 1;
+        if (metaFilters.location?.trim()) n += 1;
+        if (metaFilters.industry?.trim()) n += 1;
+        if (metaFilters.company?.trim()) n += 1;
+        if (metaFilters.connectionDegree?.trim()) n += 1;
+        if (metaFilters.quality?.trim()) n += 1;
+        if (metaFilters.status !== 'all') n += 1;
+        if (metaFilters.source !== 'all') n += 1;
+        if (metaFilters.hasEmail) n += 1;
+        if (metaFilters.hasLinkedin) n += 1;
+        if (metaFilters.hasContactInfo) n += 1;
+        return n;
+    };
+
     const hasActiveFilters = () => {
         if (activeQuickFilters.length > 0) return true;
         if (filterMode === 'advanced') {
@@ -883,8 +910,8 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             metaFilters.source !== 'all' ||
             metaFilters.hasEmail ||
             metaFilters.hasLinkedin ||
-            metaFilters.createdFrom ||
-            metaFilters.createdTo;
+            metaFilters.hasContactInfo ||
+            (metaFilters.createdFrom || metaFilters.createdTo);
     };
 
     const handleLoadMore = () => {
@@ -1419,8 +1446,14 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                                 "h-10 w-10 shadow-sm transition-all",
                                                 metaFilters.hasEmail && "bg-primary/10 border-primary text-primary"
                                             )}
-                                            onClick={() => setMetaFilters(f => ({ ...f, hasEmail: !f.hasEmail }))}
-                                            title="Filter: Leads with Email"
+                                            onClick={() => {
+                                                const newHasEmail = !metaFilters.hasEmail;
+                                                const newFilters = { ...metaFilters, hasEmail: newHasEmail };
+                                                setMetaFilters(newFilters);
+                                                fetchLeads(false, newFilters);
+                                                fetchStats({ metaFilters: newFilters });
+                                            }}
+                                            title="Filter: Leads with Email (one click to apply)"
                                         >
                                             <Mail className="h-4 w-4" />
                                         </Button>
@@ -1470,34 +1503,9 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                     <Filter className="h-4 w-4" />
                                     {hasActiveFilters() && (
                                         <span className="absolute -top-1 -right-1 px-1.5 py-0.5 text-[10px] bg-primary text-primary-foreground rounded-full font-semibold">
-                                            {
-                                                Object.keys(metaFilters).filter(k => {
-                                                    // Filter out boolean flags if false, strings if empty/all
-                                                    const v = metaFilters[k];
-                                                    if (k === 'hasEmail' || k === 'hasLinkedin') return v === true;
-                                                    return v && v !== 'all';
-                                                }).length + activeQuickFilters.length
-                                            }
+                                            {getActiveFilterCount()}
                                         </span>
                                     )}
-                                </Button>
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={() => {
-                                        setMetaFilters(prev => ({
-                                            ...prev,
-                                            source: prev.source === 'csv_import,excel_import' ? 'all' : 'csv_import,excel_import'
-                                        }));
-                                    }}
-                                    className={cn(
-                                        "shrink-0 h-10 w-10 transition-colors",
-                                        metaFilters.source === 'csv_import,excel_import' && "bg-primary/10 border-primary text-primary"
-                                    )}
-                                    title="Filter imported leads (CSV/Excel)"
-                                >
-                                    <FileSpreadsheet className="h-4 w-4" />
                                 </Button>
                                 <Button variant="outline" size="icon" className="h-10 w-10" onClick={() => fetchLeads(false)} title="Refresh">
                                     <RefreshCw className="h-4 w-4" />
@@ -1796,7 +1804,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                         </Button>
                                         {hasActiveFilters() && (
                                             <div className="flex-1 flex items-center justify-end text-xs text-muted-foreground">
-                                                {Object.values(metaFilters).filter(v => v && v !== 'all').length} active filter(s)
+                                                {getActiveFilterCount()} active filter(s)
                                             </div>
                                         )}
                                     </div>
@@ -2211,6 +2219,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                         ? `Select a campaign to generate personalized AI messages for ${selectedLeads.size} leads.`
                                         : `Select a campaign to assign the ${selectedLeads.size} selected leads.`
                                     }
+                                    <span className="block mt-1.5 text-muted-foreground/90">Max 10 leads per campaign.</span>
                                 </CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4">
@@ -2289,6 +2298,34 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                             Reject {selectedLeads.size > 0 ? selectedLeads.size : ''} Lead(s)
                         </Button>
                     </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Lead limit popup: friendly message when adding more than 10 leads per campaign */}
+            <Dialog open={showLeadLimitModal} onOpenChange={setShowLeadLimitModal}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                            <AlertTriangle className="h-5 w-5" />
+                            Campaign limit
+                        </DialogTitle>
+                        <DialogDescription asChild>
+                            <div className="space-y-2 pt-1 text-left">
+                                <p className="text-foreground font-medium">
+                                    Please select fewer leads. Each campaign can hold up to 10 leads.
+                                </p>
+                                <p className="text-sm text-muted-foreground">
+                                    This campaign already has <strong>{leadLimitModalInfo.currentCount}</strong> leads.
+                                    {leadLimitModalInfo.maxMore > 0
+                                        ? ` You can add at most ${leadLimitModalInfo.maxMore} more—please select 10 or fewer leads in total.`
+                                        : ' It is full. Choose another campaign or remove leads from this one first.'}
+                                </p>
+                            </div>
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex justify-end pt-2">
+                        <Button onClick={() => setShowLeadLimitModal(false)}>OK</Button>
+                    </div>
                 </DialogContent>
             </Dialog>
 

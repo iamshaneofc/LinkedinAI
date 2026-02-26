@@ -40,14 +40,14 @@ console.log(`   Primary Provider: ${AI_PROVIDER.toUpperCase()}`);
 
 if (anthropic) {
     console.log(`   ✅ Claude API Key loaded`);
-    console.log(`   Model: ${process.env.CLAUDE_MODEL || 'claude-3-sonnet-20240229'}`);
+    console.log(`   Model: ${process.env.CLAUDE_MODEL || 'claude-sonnet-4-5'}`);
 } else {
     console.log('   ⚪ Claude not configured');
 }
 
 if (openai) {
     console.log(`   ✅ OpenAI API Key loaded`);
-    console.log(`   Model: ${process.env.OPENAI_MODEL || 'gpt-4o-mini'}`);
+    console.log(`   Model: ${process.env.OPENAI_MODEL || 'gpt-4o'}`);
 } else {
     console.log('   ⚪ OpenAI not configured');
 }
@@ -77,20 +77,20 @@ class AIService {
     }
 
     /**
-     * Call AI API with automatic fallback
+     * Call AI API with automatic fallback.
+     * Provider and model are read from process.env on every call, so Settings changes
+     * apply globally across the entire CRM (campaigns, leads, content engine, SOW, etc.) without restart.
      */
     static async callAI(prompt, maxTokens = 300, temperature = 0.8) {
-        // Read provider dynamically — reflects Settings page changes without restart
         const activeProvider = getProvider();
         let primary = activeProvider === 'claude' ? 'claude' : 'openai';
         let secondary = activeProvider === 'claude' ? 'openai' : 'claude';
 
-        // Helper to execute call per provider
         const executeCall = async (provider) => {
             if (provider === 'claude') {
                 if (!anthropic) throw new Error('Claude not configured');
                 console.log('   📡 Calling Claude API...');
-                const model = process.env.CLAUDE_MODEL || 'claude-3-sonnet-20240229';
+                const model = process.env.CLAUDE_MODEL || 'claude-sonnet-4-5';
                 const response = await anthropic.messages.create({
                     model: model,
                     max_tokens: maxTokens,
@@ -102,7 +102,7 @@ class AIService {
             } else {
                 if (!openai) throw new Error('OpenAI not configured');
                 console.log('   📡 Calling OpenAI API...');
-                const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+                const model = process.env.OPENAI_MODEL || 'gpt-4o';
                 const response = await openai.chat.completions.create({
                     model: model,
                     messages: [{ role: 'user', content: prompt }],

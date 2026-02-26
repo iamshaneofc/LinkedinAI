@@ -255,6 +255,22 @@ export async function addLeadsToCampaign(req, res) {
             return res.status(404).json({ error: "Campaign not found" });
         }
 
+        // Max 10 leads per campaign
+        const countRes = await pool.query(
+            "SELECT COUNT(*)::int AS count FROM campaign_leads WHERE campaign_id = $1",
+            [id]
+        );
+        const currentCount = countRes.rows[0]?.count ?? 0;
+        if (currentCount + leadIds.length > MAX_LEADS_PER_CAMPAIGN) {
+            return res.status(400).json({
+                error: `Campaign can contain at most ${MAX_LEADS_PER_CAMPAIGN} leads. Currently ${currentCount}; you tried to add ${leadIds.length}. Add at most ${MAX_LEADS_PER_CAMPAIGN - currentCount} more.`,
+                code: 'LEADS_LIMIT_REACHED',
+                currentCount,
+                limit: MAX_LEADS_PER_CAMPAIGN,
+                requested: leadIds.length,
+            });
+        }
+
         // Check if campaign has sequences defined (warning only, not blocking)
         const sequencesCheck = await pool.query(
             "SELECT COUNT(*) as count FROM sequences WHERE campaign_id = $1",
@@ -424,15 +440,90 @@ export async function autoConnectCampaign(req, res) {
     }
 }
 
+const DAILY_LAUNCH_LIMIT = 2;
+const WEEKLY_LAUNCH_LIMIT = 8;
+const MAX_LEADS_PER_CAMPAIGN = 10;
+
+// GET /api/campaigns/launches-today — count campaigns launched today + this week (for limit UI)
+export async function getLaunchesToday(req, res) {
+    try {
+        const day = await pool.query(
+            `SELECT COUNT(*)::int AS count FROM campaigns 
+             WHERE launched_at IS NOT NULL AND DATE(launched_at AT TIME ZONE 'UTC') = CURRENT_DATE`
+        );
+        const week = await pool.query(
+            `SELECT COUNT(*)::int AS count FROM campaigns 
+             WHERE launched_at IS NOT NULL AND launched_at >= (CURRENT_TIMESTAMP - INTERVAL '7 days')`
+        );
+        return res.json({
+            count: day.rows[0]?.count ?? 0,
+            limit: DAILY_LAUNCH_LIMIT,
+            countWeek: week.rows[0]?.count ?? 0,
+            limitWeek: WEEKLY_LAUNCH_LIMIT,
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+}
+
 // POST /api/campaigns/:id/launch
 export async function launchCampaign(req, res) {
     try {
         const { id } = req.params;
+        const bypassLimit = req.headers['x-bypass-limit'] === 'true' || req.body?.bypassLimit === true;
         console.log(`🚀 Request to launch campaign ${id}`);
 
         // 1. Get Campaign to verify it exists
         const campaignRes = await pool.query("SELECT * FROM campaigns WHERE id = $1", [id]);
         if (campaignRes.rows.length === 0) return res.status(404).json({ error: "Campaign not found" });
+
+        // Only one campaign can run at a time: if another is active, return queued
+        const activeOther = await pool.query(
+            "SELECT id, name FROM campaigns WHERE status = 'active' AND id != $1 LIMIT 1",
+            [id]
+        );
+        if (activeOther.rows.length > 0) {
+            return res.status(409).json({
+                error: "Another campaign is currently running. Please wait—this campaign has been queued.",
+                code: 'CAMPAIGN_ALREADY_RUNNING',
+                queued: true,
+                runningCampaignName: activeOther.rows[0].name,
+            });
+        }
+
+        // Enforce daily (2/day) and weekly (8/week) launch limits unless bypassed
+        if (!bypassLimit) {
+            const dayRes = await pool.query(
+                `SELECT COUNT(*)::int AS count FROM campaigns 
+                 WHERE launched_at IS NOT NULL AND DATE(launched_at AT TIME ZONE 'UTC') = CURRENT_DATE`
+            );
+            const weekRes = await pool.query(
+                `SELECT COUNT(*)::int AS count FROM campaigns 
+                 WHERE launched_at IS NOT NULL AND launched_at >= (CURRENT_TIMESTAMP - INTERVAL '7 days')`
+            );
+            const launchesToday = dayRes.rows[0]?.count ?? 0;
+            const launchesWeek = weekRes.rows[0]?.count ?? 0;
+            if (launchesToday >= DAILY_LAUNCH_LIMIT) {
+                return res.status(403).json({
+                    error: `Daily launch limit reached (${DAILY_LAUNCH_LIMIT} campaigns per day). You can still create and edit campaigns.`,
+                    code: 'LAUNCH_LIMIT_REACHED',
+                    launchesToday,
+                    limit: DAILY_LAUNCH_LIMIT,
+                    launchesWeek,
+                    limitWeek: WEEKLY_LAUNCH_LIMIT,
+                });
+            }
+            if (launchesWeek >= WEEKLY_LAUNCH_LIMIT) {
+                return res.status(403).json({
+                    error: `Weekly launch limit reached (${WEEKLY_LAUNCH_LIMIT} campaigns per week). You can still create and edit campaigns.`,
+                    code: 'LAUNCH_LIMIT_WEEK_REACHED',
+                    launchesToday,
+                    limit: DAILY_LAUNCH_LIMIT,
+                    launchesWeek,
+                    limitWeek: WEEKLY_LAUNCH_LIMIT,
+                });
+            }
+        }
 
         // 2. Fetch Pending Leads
         // Join with leads table to get linkedin_url
@@ -480,8 +571,8 @@ export async function launchCampaign(req, res) {
         const { autoConnect } = await import("../services/phantombuster.service.js");
         const result = await autoConnect(pendingLeads.rows, hasMessages ? messages : null);
 
-        // 5. Mark campaign as active but do NOT schedule any automation flow.
-        await pool.query("UPDATE campaigns SET status = 'active' WHERE id = $1", [id]);
+        // 5. Mark campaign as active and set launched_at (for daily limit tracking)
+        await pool.query("UPDATE campaigns SET status = 'active', launched_at = COALESCE(launched_at, NOW()) WHERE id = $1", [id]);
 
         // 6. Mark campaign leads as completed so the scheduler will not pick them up
         if (leadIds.length > 0) {
@@ -1156,13 +1247,16 @@ export async function bulkEnrichAndGenerate(req, res) {
 
                 // Check for quota errors - stop processing if quota exceeded
                 if (error.message && (error.message.includes('quota') || error.message.includes('insufficient_quota'))) {
+                    const activeProvider = (process.env.AI_PROVIDER || 'openai').toLowerCase();
+                    const providerLabel = activeProvider === 'claude' ? 'Claude' : 'OpenAI';
                     console.error(`\n🛑 ============================================`);
-                    console.error(`🛑 OPENAI QUOTA EXCEEDED - STOPPING PROCESSING`);
+                    console.error(`🛑 ${providerLabel.toUpperCase()} QUOTA EXCEEDED - STOPPING PROCESSING`);
                     console.error(`🛑 ============================================\n`);
+                    results.quotaExceededProvider = activeProvider;
                     results.failed.push({
                         leadId: lead.id,
                         name: `${lead.first_name} ${lead.last_name}`,
-                        error: 'OpenAI quota exceeded - processing stopped'
+                        error: `${providerLabel} API quota exceeded - processing stopped`
                     });
                     // Add remaining leads to failed list
                     const remainingLeads = leadsWithLinkedIn.slice(leadsWithLinkedIn.indexOf(lead) + 1);
