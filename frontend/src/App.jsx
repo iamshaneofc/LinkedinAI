@@ -2,6 +2,9 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import DashboardLayout from './components/layout/DashboardLayout';
 import DashboardPage from './pages/DashboardPage';
 import LeadsTable from './components/LeadsTable';
+import ConnectionsPage from './pages/ConnectionsPage';
+import ProspectsPage from './pages/ProspectsPage';
+import MyContactsPage from './pages/MyContactsPage';
 import LeadDetailPage from './pages/LeadDetailPage';
 import LeadSearchPage from './pages/LeadSearchPage';
 import LeadImportPage from './pages/LeadImportPage';
@@ -19,7 +22,10 @@ function App() {
                 <Route index element={<DashboardPage />} />
                 <Route path="lead-import" element={<LeadImportPage />} />
                 <Route path="search" element={<LeadSearchPage />} />
-                <Route path="leads" element={<LeadsTable />} />
+                <Route path="connections" element={<ConnectionsPage />} />
+                <Route path="prospects" element={<ProspectsPage />} />
+                <Route path="my-contacts" element={<MyContactsPage />} />
+                <Route path="leads" element={<Navigate to="/connections" replace />} />
                 <Route path="leads/:id" element={<LeadDetailPage />} />
                 <Route path="campaigns" element={<CampaignsPage />} />
                 <Route path="campaigns/:id" element={<CampaignDetailPage />} />

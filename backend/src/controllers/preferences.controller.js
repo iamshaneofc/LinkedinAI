@@ -17,22 +17,60 @@ import {
     recalculateAllScores,
 } from '../services/preferenceScoring.service.js';
 
+const DEFAULT_TIERS = Object.freeze({
+    primary: { titles: [], industries: [], company_sizes: [] },
+    secondary: { titles: [], industries: [], company_sizes: [] },
+    tertiary: { titles: [], industries: [], company_sizes: [] },
+});
+
+// Validate: max 5 per dropdown, no duplicate value across tiers
+function validatePreferenceTiers(tiers) {
+    if (!tiers || typeof tiers !== 'object') return null;
+    const all = [];
+    const out = { primary: {}, secondary: {}, tertiary: {} };
+    for (const tier of ['primary', 'secondary', 'tertiary']) {
+        const t = tiers[tier];
+        if (!t || typeof t !== 'object') {
+            out[tier] = { titles: [], industries: [], company_sizes: [] };
+            continue;
+        }
+        out[tier] = {};
+        for (const key of ['titles', 'industries', 'company_sizes']) {
+            let arr = Array.isArray(t[key]) ? t[key].filter(Boolean) : [];
+            arr = arr.slice(0, 5); // max 5
+            const seen = new Set(all.map(String).map(s => s.toLowerCase()));
+            arr = arr.filter(v => {
+                const vn = String(v).toLowerCase().trim();
+                if (seen.has(vn)) return false;
+                seen.add(vn);
+                all.push(v);
+                return true;
+            });
+            out[tier][key] = arr;
+        }
+    }
+    return out;
+}
+
 // GET /api/preferences
 export async function getPreferences(req, res) {
     try {
         const prefs = await loadPreferences();
-        return res.json(prefs || {
+        const fallback = {
             linkedin_profile_url: '',
-            preferred_companies: '',
-            preferred_industries: [],
-            preferred_titles: [],
-            preferred_locations: '',
-            niche_keywords: '',
+            preference_tiers: DEFAULT_TIERS,
+            secondary_priority_threshold: 70,
             profile_meta: {},
-            primary_threshold: 120,
-            secondary_threshold: 60,
-            auto_approval_threshold: 150,
             preference_active: false,
+        };
+        if (!prefs) return res.json(fallback);
+        const prefsTiers = prefs.preference_tiers && typeof prefs.preference_tiers === 'object'
+            ? prefs.preference_tiers
+            : DEFAULT_TIERS;
+        return res.json({
+            ...prefs,
+            preference_tiers: prefsTiers,
+            secondary_priority_threshold: prefs.secondary_priority_threshold ?? 70,
         });
     } catch (err) {
         console.error('[preferences] GET error:', err);
@@ -45,20 +83,20 @@ export async function updatePreferences(req, res) {
     try {
         const {
             linkedin_profile_url,
+            preference_tiers,
+            secondary_priority_threshold,
+            profile_meta,
+            preference_active,
             preferred_companies,
             preferred_industries,
             preferred_titles,
             preferred_locations,
             niche_keywords,
-            profile_meta,
             primary_threshold,
             secondary_threshold,
             auto_approval_threshold,
-            preference_active,
         } = req.body;
 
-        // Also sync LINKEDIN_PROFILE_URL and PREFERRED_COMPANY_KEYWORDS to env
-        // so the old matchesUserNiche logic keeps working as well
         if (linkedin_profile_url) {
             process.env.LINKEDIN_PROFILE_URL = linkedin_profile_url;
         }
@@ -66,18 +104,21 @@ export async function updatePreferences(req, res) {
             process.env.PREFERRED_COMPANY_KEYWORDS = preferred_companies;
         }
 
+        const validatedTiers = preference_tiers != null ? validatePreferenceTiers(preference_tiers) : undefined;
         await savePreferences({
             linkedin_profile_url,
+            preference_tiers: validatedTiers,
+            secondary_priority_threshold,
+            profile_meta,
+            preference_active,
             preferred_companies,
             preferred_industries,
             preferred_titles,
             preferred_locations,
             niche_keywords,
-            profile_meta,
             primary_threshold,
             secondary_threshold,
             auto_approval_threshold,
-            preference_active,
         });
 
         // Rescore asynchronously — don't block the HTTP response
@@ -130,5 +171,54 @@ export async function rescoreLeads(req, res) {
         await recalculateAllScores();
     } catch (err) {
         console.error('[preferences] rescore error:', err);
+    }
+}
+
+// POST /api/preferences/analyze — AI suggest tiered preferences from LinkedIn Profile URL
+export async function analyzeProfileForPreferences(req, res) {
+    try {
+        const { linkedin_profile_url } = req.body || {};
+        if (!linkedin_profile_url || typeof linkedin_profile_url !== 'string') {
+            return res.status(400).json({ error: 'linkedin_profile_url is required' });
+        }
+        const url = linkedin_profile_url.trim();
+        if (!url.includes('linkedin.com')) {
+            return res.status(400).json({ error: 'Valid LinkedIn profile URL is required' });
+        }
+
+        let profileMeta = {};
+        try {
+            const profileEnrichmentService = (await import('../services/profileEnrichment.service.js')).default;
+            const profile = await profileEnrichmentService.enrichProfileFromUrl(url);
+            if (profile) {
+                profileMeta = {
+                    title: profile.title || profile.headline,
+                    industry: profile.industry,
+                    company: profile.company,
+                    companySize: profile.companySize || profile.company_size,
+                };
+            }
+        } catch (e) {
+            console.warn('[preferences] Analyze profile fetch failed:', e.message);
+        }
+
+        const titles = profileMeta.title ? [profileMeta.title] : [];
+        const industries = profileMeta.industry ? [profileMeta.industry] : [];
+        const companySizes = profileMeta.companySize ? [String(profileMeta.companySize)] : [];
+
+        const suggested = validatePreferenceTiers({
+            primary: { titles, industries, company_sizes: companySizes },
+            secondary: { titles: [], industries: [], company_sizes: [] },
+            tertiary: { titles: [], industries: [], company_sizes: [] },
+        }) || DEFAULT_TIERS;
+
+        return res.json({
+            success: true,
+            suggested,
+            profile_meta: profileMeta,
+        });
+    } catch (err) {
+        console.error('[preferences] analyze error:', err);
+        res.status(500).json({ error: err.message });
     }
 }

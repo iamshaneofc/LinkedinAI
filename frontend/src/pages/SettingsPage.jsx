@@ -70,16 +70,19 @@ const SettingsPage = () => {
     webhookUrl: `${window.location.origin.replace("5173", "5000")}/api/webhooks/phantombuster`,
   });
 
+  const defaultTiers = {
+    primary: { titles: [], industries: [], company_sizes: [] },
+    secondary: { titles: [], industries: [], company_sizes: [] },
+    tertiary: { titles: [], industries: [], company_sizes: [] },
+  };
   const [preferences, setPreferences] = useState({
     linkedin_profile_url: "",
-    preferred_companies: "",
-    preferred_industries: "",
-    preferred_titles: "",
-    preferred_locations: "",
-    niche_keywords: "",
+    preference_tiers: defaultTiers,
+    secondary_priority_threshold: 70,
     preference_active: false,
   });
   const [preferencesSaving, setPreferencesSaving] = useState(false);
+  const [analyzingProfile, setAnalyzingProfile] = useState(false);
 
 
 
@@ -213,15 +216,20 @@ const SettingsPage = () => {
       try {
         const res = await axios.get("/api/preferences");
         if (res.data) {
-          setPreferences({
+          const tiers = res.data.preference_tiers && typeof res.data.preference_tiers === "object"
+            ? res.data.preference_tiers
+            : defaultTiers;
+          setPreferences((prev) => ({
+            ...prev,
             linkedin_profile_url: res.data.linkedin_profile_url || "",
-            preferred_companies: res.data.preferred_companies || "",
-            preferred_industries: Array.isArray(res.data.preferred_industries) ? res.data.preferred_industries.join(", ") : "",
-            preferred_titles: Array.isArray(res.data.preferred_titles) ? res.data.preferred_titles.join(", ") : "",
-            preferred_locations: res.data.preferred_locations || "",
-            niche_keywords: res.data.niche_keywords || "",
+            preference_tiers: {
+              primary: { ...defaultTiers.primary, ...(tiers.primary || {}) },
+              secondary: { ...defaultTiers.secondary, ...(tiers.secondary || {}) },
+              tertiary: { ...defaultTiers.tertiary, ...(tiers.tertiary || {}) },
+            },
+            secondary_priority_threshold: res.data.secondary_priority_threshold ?? 70,
             preference_active: res.data.preference_active || false,
-          });
+          }));
         }
       } catch (error) {
         console.error("Failed to load preferences", error);
@@ -317,17 +325,41 @@ const SettingsPage = () => {
   const savePreferences = async () => {
     setPreferencesSaving(true);
     try {
-      const p = {
-        ...preferences,
-        preferred_industries: preferences.preferred_industries ? preferences.preferred_industries.split(",").map(i => i.trim()).filter(Boolean) : [],
-        preferred_titles: preferences.preferred_titles ? preferences.preferred_titles.split(",").map(i => i.trim()).filter(Boolean) : []
-      };
-      await axios.put("/api/preferences", p);
-      addToast("Preferences saved successfully. Leads are being rescored.", "success");
+      await axios.put("/api/preferences", {
+        linkedin_profile_url: preferences.linkedin_profile_url,
+        preference_tiers: preferences.preference_tiers,
+        secondary_priority_threshold: preferences.secondary_priority_threshold,
+        preference_active: preferences.preference_active,
+      });
+      addToast("Preferences saved. Leads are being rescored.", "success");
     } catch (error) {
       addToast("Failed to save preferences", "error");
     } finally {
       setPreferencesSaving(false);
+    }
+  };
+
+  const analyzeProfile = async () => {
+    if (!preferences.linkedin_profile_url?.trim()) {
+      addToast("Enter your LinkedIn Profile URL first", "warning");
+      return;
+    }
+    setAnalyzingProfile(true);
+    try {
+      const res = await axios.post("/api/preferences/analyze", {
+        linkedin_profile_url: preferences.linkedin_profile_url.trim(),
+      });
+      if (res.data?.suggested) {
+        setPreferences((prev) => ({
+          ...prev,
+          preference_tiers: res.data.suggested,
+        }));
+        addToast("Profile analyzed. Suggested tiers filled. Edit and save.", "success");
+      }
+    } catch (error) {
+      addToast(error.response?.data?.error || "Analyze failed", "error");
+    } finally {
+      setAnalyzingProfile(false);
     }
   };
 
@@ -1145,76 +1177,97 @@ const SettingsPage = () => {
               <Label htmlFor="li-profile" className="flex items-center gap-2">
                 <Linkedin className="w-4 h-4" /> LinkedIn profile URL
               </Label>
-              <Input
-                id="li-profile"
-                type="url"
-                placeholder="https://www.linkedin.com/in/your-profile/"
-                value={preferences.linkedin_profile_url}
-                onChange={(e) =>
-                  setPreferences({ ...preferences, linkedin_profile_url: e.target.value })
-                }
-              />
+              <div className="flex gap-2">
+                <Input
+                  id="li-profile"
+                  type="url"
+                  placeholder="https://www.linkedin.com/in/your-profile/"
+                  value={preferences.linkedin_profile_url}
+                  onChange={(e) => setPreferences({ ...preferences, linkedin_profile_url: e.target.value })}
+                  className="flex-1"
+                />
+                <Button type="button" variant="outline" onClick={analyzeProfile} disabled={analyzingProfile}>
+                  {analyzingProfile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  Analyze
+                </Button>
+              </div>
+              <p className="text-[10px] text-muted-foreground">Analyze suggests Primary tier from your profile. Max 5 per dropdown, no duplicates across tiers.</p>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="preferred-companies" className="flex items-center gap-2">
-                  <Building2 className="w-4 h-4" /> Preferred companies <span className="text-muted-foreground text-[10px] ml-auto">Optional</span>
-                </Label>
-                <Input
-                  id="preferred-companies"
-                  placeholder="e.g. Acme, Partner Co (comma separated)"
-                  value={preferences.preferred_companies}
-                  onChange={(e) => setPreferences({ ...preferences, preferred_companies: e.target.value })}
-                />
+            {["primary", "secondary", "tertiary"].map((tier) => (
+              <div key={tier} className="rounded-lg border border-border/60 p-4 space-y-3">
+                <h4 className="text-sm font-semibold capitalize">{tier} tier</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Titles (comma, max 5)</Label>
+                    <Input
+                      placeholder="e.g. CEO, Director"
+                      value={Array.isArray(preferences.preference_tiers?.[tier]?.titles) ? preferences.preference_tiers[tier].titles.join(", ") : ""}
+                      onChange={(e) => {
+                        const arr = e.target.value.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 5);
+                        setPreferences({
+                          ...preferences,
+                          preference_tiers: {
+                            ...preferences.preference_tiers,
+                            [tier]: { ...(preferences.preference_tiers[tier] || {}), titles: arr },
+                          },
+                        });
+                      }}
+                      className="h-9"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Industries (comma, max 5)</Label>
+                    <Input
+                      placeholder="e.g. Technology, SaaS"
+                      value={Array.isArray(preferences.preference_tiers?.[tier]?.industries) ? preferences.preference_tiers[tier].industries.join(", ") : ""}
+                      onChange={(e) => {
+                        const arr = e.target.value.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 5);
+                        setPreferences({
+                          ...preferences,
+                          preference_tiers: {
+                            ...preferences.preference_tiers,
+                            [tier]: { ...(preferences.preference_tiers[tier] || {}), industries: arr },
+                          },
+                        });
+                      }}
+                      className="h-9"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Company sizes (comma, max 5)</Label>
+                    <Input
+                      placeholder="e.g. 1-10, 51-200"
+                      value={Array.isArray(preferences.preference_tiers?.[tier]?.company_sizes) ? preferences.preference_tiers[tier].company_sizes.join(", ") : ""}
+                      onChange={(e) => {
+                        const arr = e.target.value.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 5);
+                        setPreferences({
+                          ...preferences,
+                          preference_tiers: {
+                            ...preferences.preference_tiers,
+                            [tier]: { ...(preferences.preference_tiers[tier] || {}), company_sizes: arr },
+                          },
+                        });
+                      }}
+                      className="h-9"
+                    />
+                  </div>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="preferred-industries" className="flex items-center gap-2">
-                  <Building2 className="w-4 h-4" /> Preferred industries <span className="text-muted-foreground text-[10px] ml-auto">Optional</span>
-                </Label>
-                <Input
-                  id="preferred-industries"
-                  placeholder="e.g. Technology, SaaS (comma separated)"
-                  value={preferences.preferred_industries}
-                  onChange={(e) => setPreferences({ ...preferences, preferred_industries: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="preferred-titles" className="flex items-center gap-2">
-                  <User className="w-4 h-4" /> Preferred titles <span className="text-muted-foreground text-[10px] ml-auto">Optional</span>
-                </Label>
-                <Input
-                  id="preferred-titles"
-                  placeholder="e.g. CEO, Founder, Director (comma separated)"
-                  value={preferences.preferred_titles}
-                  onChange={(e) => setPreferences({ ...preferences, preferred_titles: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="preferred-locations" className="flex items-center gap-2">
-                  <Check className="w-4 h-4 text-transparent" /> Locations <span className="text-muted-foreground text-[10px] ml-auto">Optional</span>
-                </Label>
-                <Input
-                  id="preferred-locations"
-                  placeholder="e.g. London, United Kingdom (comma separated)"
-                  value={preferences.preferred_locations}
-                  onChange={(e) => setPreferences({ ...preferences, preferred_locations: e.target.value })}
-                />
-              </div>
-            </div>
+            ))}
             <div className="space-y-2">
-              <Label htmlFor="niche-keywords" className="flex items-center gap-2">
-                <Key className="w-4 h-4" /> Niche keywords <span className="text-muted-foreground text-[10px] ml-auto">Optional</span>
-              </Label>
+              <Label className="text-xs text-muted-foreground">Secondary → My Contacts threshold (score ≥)</Label>
               <Input
-                id="niche-keywords"
-                placeholder="e.g. AI, B2B, Automation (comma separated)"
-                value={preferences.niche_keywords}
-                onChange={(e) => setPreferences({ ...preferences, niche_keywords: e.target.value })}
+                type="number"
+                min={0}
+                max={200}
+                value={preferences.secondary_priority_threshold ?? 70}
+                onChange={(e) => setPreferences({ ...preferences, secondary_priority_threshold: parseInt(e.target.value, 10) || 70 })}
+                className="w-24 h-9"
               />
-              <p className="text-[10px] text-muted-foreground mt-1">
-                These criteria will score incoming leads. Tiering active status applies logic dynamically to dashboards and tables.
-              </p>
             </div>
+            <p className="text-[10px] text-muted-foreground">
+              Tiered criteria score leads. Primary match = highest; Secondary with score ≥ threshold = My Contacts. Rescore runs on save.
+            </p>
           </CardContent>
           <CardFooter>
             <Button onClick={savePreferences} disabled={preferencesSaving} className="gap-2">

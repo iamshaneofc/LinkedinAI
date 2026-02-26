@@ -28,6 +28,7 @@ import {
     moveToReview,
     getReviewStats,
     qualifyLeadsByNiche,
+    backToReview,
     createLead,
     exportLeads
 } from "../controllers/lead.controller.js";
@@ -40,6 +41,7 @@ router.get("/review-stats", getReviewStats);
 router.post("/bulk-approve", bulkApproveLeads);
 router.post("/bulk-reject", bulkRejectLeads);
 router.post("/move-to-review", moveToReview);
+router.post("/back-to-review", backToReview);
 router.post("/qualify-by-niche", qualifyLeadsByNiche);
 
 router.get("/", getLeads);

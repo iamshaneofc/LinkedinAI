@@ -96,24 +96,25 @@ export async function saveLead(lead) {
   // Check if lead matches user's niche BEFORE determining review_status
   const matchesNiche = await matchesUserNiche(lead);
 
-  // Score the lead with the new dynamic system
-  const { score, tier, shouldAutoApprove } = await scoreAndClassifyLead(lead);
+  // Score the lead with the tiered preference model (sets is_priority + review_status)
+  const { score, tier, isPriority, reviewStatus: scoringReviewStatus } = await scoreAndClassifyLead(lead);
 
-  const shouldApprove = matchesNiche ||
-    (lead.connectionDegree && lead.connectionDegree.toLowerCase().includes('1st')) ||
-    shouldAutoApprove ||
-    lead.reviewStatus === 'approved';
-
-  // Determine initial review_status
-  let initialReviewStatus = lead.reviewStatus || 'to_be_reviewed';
-  if (shouldApprove) {
+  // Import flow: always use scoring result. Manual/niche: allow niche to approve.
+  const fromImport = lead.reviewStatus === 'to_be_reviewed' && lead.source && /phantom|connections_export|search_export|csv_import|excel_import/i.test(lead.source);
+  let initialReviewStatus = scoringReviewStatus;
+  let initialIsPriority = isPriority;
+  if (!fromImport && matchesNiche) {
+    initialReviewStatus = 'approved';
+    initialIsPriority = initialIsPriority || true;
+  }
+  if (!fromImport && lead.reviewStatus === 'approved') {
     initialReviewStatus = 'approved';
   }
 
   const query = `
     INSERT INTO leads
-    (linkedin_url, first_name, last_name, full_name, title, company, location, profile_image, source, connection_degree, review_status, preference_score, preference_tier)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+    (linkedin_url, first_name, last_name, full_name, title, company, location, profile_image, source, connection_degree, review_status, preference_score, preference_tier, is_priority)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
     ON CONFLICT (linkedin_url) DO UPDATE SET
       first_name = COALESCE(EXCLUDED.first_name, leads.first_name),
       last_name = COALESCE(EXCLUDED.last_name, leads.last_name),
@@ -122,73 +123,50 @@ export async function saveLead(lead) {
       company = COALESCE(EXCLUDED.company, leads.company),
       location = COALESCE(EXCLUDED.location, leads.location),
       profile_image = COALESCE(EXCLUDED.profile_image, leads.profile_image),
-      -- Always update connection_degree with new data from PhantomBuster (don't keep NULL)
       connection_degree = EXCLUDED.connection_degree,
-      -- Auto-promote to approved if:
-      -- 1. New connection_degree is '1st' (case insensitive)
-      -- 2. Lead matches user's niche (preferred keywords, industry, profile keywords)
-      -- 3. New review_status is 'approved' (from auto-approval logic)
-      -- Never downgrade from 'approved' back to 'to_be_reviewed'
-      review_status = CASE
-        WHEN LOWER(EXCLUDED.connection_degree) LIKE '%1st%' THEN 'approved'
-        WHEN EXCLUDED.review_status = 'approved' THEN 'approved'
-        WHEN leads.review_status = 'approved' THEN 'approved'
-        ELSE COALESCE(EXCLUDED.review_status, leads.review_status)
-      END,
-      -- Always update score/tier with freshly scored values
+      review_status = EXCLUDED.review_status,
       preference_score = EXCLUDED.preference_score,
       preference_tier  = EXCLUDED.preference_tier,
-      -- Set approved_at timestamp when promoting to approved
-      approved_at = CASE
-        WHEN (LOWER(EXCLUDED.connection_degree) LIKE '%1st%' OR EXCLUDED.review_status = 'approved') 
-             AND leads.approved_at IS NULL 
-        THEN NOW()
-        ELSE leads.approved_at
-      END,
+      is_priority      = EXCLUDED.is_priority,
+      approved_at = CASE WHEN EXCLUDED.review_status = 'approved' AND leads.approved_at IS NULL THEN NOW() ELSE leads.approved_at END,
       updated_at = NOW()
     RETURNING (xmax = 0) AS inserted;
   `;
 
   const values = [
-    safeTruncate(lead.linkedinUrl, 500),   // VARCHAR(500)
-    safeTruncate(lead.firstName, 100),     // VARCHAR(100)
-    safeTruncate(lead.lastName, 100),      // VARCHAR(100)
-    safeTruncate(lead.fullName, 255),      // VARCHAR(255)
-    safeTruncate(lead.title, 255),         // VARCHAR(255)
-    safeTruncate(lead.company, 255),       // VARCHAR(255)
-    safeTruncate(lead.location, 255),      // VARCHAR(255)
-    safeTruncate(lead.profileImage, 500),  // VARCHAR(500)
-    safeTruncate(lead.source, 100),        // VARCHAR(100)
+    safeTruncate(lead.linkedinUrl, 500),
+    safeTruncate(lead.firstName, 100),
+    safeTruncate(lead.lastName, 100),
+    safeTruncate(lead.fullName, 255),
+    safeTruncate(lead.title, 255),
+    safeTruncate(lead.company, 255),
+    safeTruncate(lead.location, 255),
+    safeTruncate(lead.profileImage, 500),
+    safeTruncate(lead.source, 100),
     safeTruncate(lead.connectionDegree || lead.connection_degree, 50),
     safeTruncate(initialReviewStatus, 50),
-    score,   // preference_score
-    tier,    // preference_tier
+    score,
+    tier || 'tertiary',
+    !!initialIsPriority,
   ];
 
   const result = await pool.query(query, values);
   const wasInserted = result.rows[0]?.inserted;
 
-  // If lead matches niche and was updated (not inserted), check if we need to auto-approve
+  // If lead matches niche and was updated (not inserted), promote to approved
   if (matchesNiche && !wasInserted) {
-    // Check current status - if it's 'to_be_reviewed', auto-approve it
     const currentLead = await pool.query(
       'SELECT review_status FROM leads WHERE linkedin_url = $1',
       [safeTruncate(lead.linkedinUrl, 500)]
     );
-
     if (currentLead.rows[0]?.review_status === 'to_be_reviewed') {
       await pool.query(
-        `UPDATE leads 
-         SET review_status = 'approved', 
-             approved_at = CASE WHEN approved_at IS NULL THEN NOW() ELSE approved_at END
-         WHERE linkedin_url = $1 AND review_status = 'to_be_reviewed'`,
+        `UPDATE leads SET review_status = 'approved', is_priority = TRUE, approved_at = CASE WHEN approved_at IS NULL THEN NOW() ELSE approved_at END WHERE linkedin_url = $1`,
         [safeTruncate(lead.linkedinUrl, 500)]
       );
       console.log(`🎯 Auto-qualified existing lead matching your niche: ${lead.company || 'Unknown'} - ${lead.title || 'Unknown'}`);
     }
   }
-
-  // Log auto-qualification if it happened for new leads
   if (matchesNiche && wasInserted) {
     console.log(`🎯 Auto-qualified new lead matching your niche: ${lead.company || 'Unknown'} - ${lead.title || 'Unknown'}`);
   }

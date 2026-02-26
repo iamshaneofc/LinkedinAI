@@ -267,6 +267,20 @@ export async function addLeadsToCampaign(req, res) {
             // Don't block, but log a warning - user might be adding sequences later
         }
 
+        // CRM rule: Only approved leads can be added to campaigns
+        const leadsCheck = await pool.query(
+            "SELECT id, review_status FROM leads WHERE id = ANY($1::int[])",
+            [leadIds]
+        );
+        const notApproved = leadsCheck.rows.filter((r) => r.review_status !== 'approved');
+        if (notApproved.length > 0) {
+            return res.status(400).json({
+                error: "Only approved (qualified) leads can be added to campaigns.",
+                notApprovedIds: notApproved.map((r) => r.id),
+                count: notApproved.length,
+            });
+        }
+
         // Bulk insert
         // Note: This is a simple implementation. For large batches, consider using pg-format or UNNEST.
         let addedCount = 0;

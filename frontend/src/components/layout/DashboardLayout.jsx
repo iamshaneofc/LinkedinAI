@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { LayoutDashboard, Users, Megaphone, Settings, Menu, Newspaper, Search, ChevronDown, Sun, Moon } from 'lucide-react';
+import { LayoutDashboard, Users, UserPlus, Contact, Megaphone, Settings, Menu, Newspaper, Search, ChevronDown, Sun, Moon } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import NotificationDropdown from '../NotificationDropdown';
 import { TimeFilterProvider } from '../../context/TimeFilterContext';
@@ -9,18 +9,9 @@ import { TimeFilterProvider } from '../../context/TimeFilterContext';
 const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/', color: '#6366f1' },
     { id: 'search', label: 'Lead Search', icon: Search, path: '/search', color: '#0ea5e9' },
-    {
-        id: 'leads',
-        label: 'Leads',
-        icon: Users,
-        path: '/leads',
-        color: '#10b981',
-        children: [
-            { id: 'my-contacts-new', label: 'My Contacts', path: '/leads?has_contact_info=true' },
-            { id: 'my-contacts', label: 'Connections', path: '/leads?connection_degree=1st' },
-            { id: 'prospects', label: 'Prospects', path: '/leads?connection_degree=2nd,3rd' },
-        ]
-    },
+    { id: 'connections', label: 'Connections', icon: Users, path: '/connections', color: '#10b981' },
+    { id: 'prospects', label: 'Prospects', icon: UserPlus, path: '/prospects', color: '#0ea5e9' },
+    { id: 'my-contacts', label: 'My Contacts', icon: Contact, path: '/my-contacts', color: '#8b5cf6' },
     { id: 'campaigns', label: 'Campaigns', icon: Megaphone, path: '/campaigns', color: '#f59e0b' },
     { id: 'content', label: 'Content Engine', icon: Newspaper, path: '/content', color: '#a855f7' },
     { id: 'settings', label: 'Settings', icon: Settings, path: '/settings', color: '#64748b' },

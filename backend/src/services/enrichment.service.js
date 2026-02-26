@@ -31,6 +31,11 @@ class EnrichmentService {
                 throw new Error('Lead has no LinkedIn URL');
             }
 
+            // CRM rule: Enrichment only for approved leads (connections do NOT bypass)
+            if (lead.review_status !== 'approved') {
+                throw new Error('Only approved (qualified) leads can be enriched. Please qualify this lead first.');
+            }
+
             // 2. Launch PhantomBuster Profile Scraper
             const phantomId = process.env.PROFILE_SCRAPER_PHANTOM_ID;
 

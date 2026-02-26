@@ -44,7 +44,7 @@ const QUICK_FILTERS = [
     { id: 'sales_dir', label: 'Sales Directors', preset: { title: 'Sales Director' }, icon: Target }
 ];
 
-export default function LeadsTable() {
+export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, showBackToReview = false } = {}) {
     const navigate = useNavigate();
     const { addToast } = useToast();
     const [leads, setLeads] = useState([]);
@@ -434,16 +434,12 @@ export default function LeadsTable() {
         }
 
         try {
-            // Auto-qualify any selected leads that are in 'to_be_reviewed' or 'imported' status
             const selectedLeadIds = Array.from(selectedLeads);
-            const needsApproval = leads
-                .filter(l => selectedLeads.has(l.id) && l.review_status !== 'approved')
-                .map(l => l.id);
-
-            if (needsApproval.length > 0) {
-                await axios.post('/api/leads/bulk-approve', { leadIds: needsApproval });
+            const notApproved = leads.filter(l => selectedLeads.has(l.id) && l.review_status !== 'approved');
+            if (notApproved.length > 0) {
+                addToast('Only approved (qualified) leads can be added to campaigns. Qualify the selected leads first or remove them from selection.', 'warning');
+                return;
             }
-
             await axios.post(`/api/campaigns/${selectedCampaignId}/leads`, {
                 leadIds: selectedLeadIds
             });
@@ -501,8 +497,8 @@ export default function LeadsTable() {
     const fetchLeads = async (append = false, overrideFilters = null, silent = false) => {
         const filtersToUse = overrideFilters ?? metaFilters;
 
-        // My Contacts (has_contact_info=true) should display no leads for now as per request
-        if (filtersToUse.hasContactInfo) {
+        // My Contacts (legacy has_contact_info) — deprecated in favor of is_priority page
+        if (filtersToUse.hasContactInfo && !baseQuery?.is_priority) {
             setLeads([]);
             setPagination({ page: 1, limit: 50, total: 0 });
             setLoading(false);
@@ -523,6 +519,14 @@ export default function LeadsTable() {
             params.set('page', currentPage.toString());
             params.set('limit', '50');
 
+            // Base query from page context (Connections / Prospects / My Contacts)
+            if (baseQuery?.connection_degree) {
+                params.set('connection_degree', baseQuery.connection_degree);
+            }
+            if (baseQuery?.is_priority) {
+                params.set('is_priority', 'true');
+            }
+
             if (searchTerm.trim()) {
                 params.set('search', searchTerm.trim());
             }
@@ -539,12 +543,10 @@ export default function LeadsTable() {
             if (filtersToUse.industry?.trim()) {
                 params.set('industry', filtersToUse.industry.trim());
             }
-            if (filtersToUse.connectionDegree?.trim()) {
+            if (!baseQuery?.connection_degree && filtersToUse.connectionDegree?.trim()) {
                 if (!filtersToUse.connectionDegree.includes(',')) {
-                    // Single degree, pass as standard param
                     params.set('connection_degree', filtersToUse.connectionDegree.trim());
                 }
-                // If multiple (e.g. "2nd,3rd"), we handle it via advanced logic below
             }
             if (filtersToUse.quality?.trim()) {
                 params.set('quality', filtersToUse.quality.trim());
@@ -571,13 +573,11 @@ export default function LeadsTable() {
                 params.set('createdTo', filtersToUse.createdTo);
             }
 
-            // PHASE 4: Filter by Review Status Tab
-            if (reviewStatusTab && reviewStatusTab !== 'imported') {
+            // PHASE 4: Filter by Review Status Tab (skip when My Contacts single list)
+            if (showReviewTabs && reviewStatusTab && reviewStatusTab !== 'imported') {
                 params.set('review_status', reviewStatusTab);
             }
-
-            // Filter by imported sources when imported tab is active
-            if (reviewStatusTab === 'imported') {
+            if (showReviewTabs && reviewStatusTab === 'imported') {
                 params.set('source', 'csv_import,excel_import');
             }
 
@@ -702,9 +702,14 @@ export default function LeadsTable() {
             const currentMetaFilters = overrides.metaFilters || metaFilters;
             const currentQuickFilters = overrides.quickFilters || activeQuickFilters;
 
-            // Add connection degree filter
-            if (currentMetaFilters.connectionDegree) {
+            // Base query from page context
+            if (baseQuery?.connection_degree) {
+                params.connection_degree = baseQuery.connection_degree;
+            } else if (currentMetaFilters.connectionDegree) {
                 params.connection_degree = currentMetaFilters.connectionDegree;
+            }
+            if (baseQuery?.is_priority) {
+                params.is_priority = 'true';
             }
 
             // Add quality filter from BOTH quick filters AND metaFilters.quality (Primary, Secondary, Tertiary)
@@ -1164,9 +1169,21 @@ export default function LeadsTable() {
             fetchLeads(false, null, true);
             fetchStats();
         } catch (error) {
-            console.error('Qualify by niche failed:', error);
-            const errorMsg = error.response?.data?.error || error.message || 'Failed to qualify leads by niche';
-            addToast(`Error: ${errorMsg}`, 'error');
+            addToast(error.response?.data?.error || error.message || 'Failed to qualify by niche', 'error');
+        }
+    };
+
+    const handleBackToReview = async () => {
+        const leadIds = Array.from(selectedLeads);
+        if (leadIds.length === 0) return;
+        try {
+            await axios.post('/api/leads/back-to-review', { leadIds });
+            addToast(`Moved ${leadIds.length} lead(s) back to Review`, 'success');
+            setSelectedLeads(new Set());
+            fetchLeads();
+            fetchStats();
+        } catch (error) {
+            addToast(error.response?.data?.error || error.message || 'Failed to move back to review', 'error');
         }
     };
 
@@ -1792,7 +1809,8 @@ export default function LeadsTable() {
                     {/* Sticky Control Header: Tabs and Selection Toolbar */}
                     <div className="sticky top-[64px] z-30 bg-background/95 backdrop-blur-md -mx-6 px-6 py-3 border-b border-border/60 transition-all duration-300">
                         <div className="flex flex-col gap-3">
-                            {/* Review Status Tabs */}
+                            {/* Review Status Tabs (hidden on My Contacts) */}
+                            {showReviewTabs && (
                             <div className="flex gap-2 items-center">
                                 <div className="flex gap-2 flex-1">
                                     <button
@@ -1843,6 +1861,7 @@ export default function LeadsTable() {
                                     </Button>
                                 )}
                             </div>
+                            )}
 
                             {/* Selection Toolbar (Conditional but takes no space when empty) */}
                             {selectedLeads.size > 0 && (
@@ -1895,6 +1914,11 @@ export default function LeadsTable() {
                                         )}
 
                                         <div className="w-px h-6 bg-primary/20 mx-1" />
+                                        {showBackToReview && (
+                                            <Button size="sm" variant="outline" className="gap-2 border-amber-500/50 text-amber-600 hover:bg-amber-500/10" onClick={handleBackToReview} title="Move selected back to Review">
+                                                ↩ Back to Review
+                                            </Button>
+                                        )}
                                         <Button variant="ghost" size="sm" onClick={() => setSelectedLeads(new Set())} >
                                             Cancel
                                         </Button>

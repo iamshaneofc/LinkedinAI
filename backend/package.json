@@ -7,7 +7,8 @@
     "start": "node src/server.js",
     "check-api": "node src/scripts/check-api.js",
     "check-search-export": "node src/scripts/check-search-export.js",
-    "add-dummy-gmails": "node src/scripts/add_dummy_gmails.js"
+    "add-dummy-gmails": "node src/scripts/add_dummy_gmails.js",
+    "migrate:028": "node scripts/run_028_migration.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",

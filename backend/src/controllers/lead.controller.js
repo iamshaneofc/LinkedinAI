@@ -162,6 +162,7 @@ export async function getLeads(req, res) {
       hasEmail,
       hasLinkedin,
       has_contact_info, // My Contacts filter: leads with email OR phone
+      is_priority,      // My Contacts page: AI high-priority leads only
       search,
       title,
       location,
@@ -234,6 +235,11 @@ export async function getLeads(req, res) {
       // My Contacts: leads with email OR phone
       if (has_contact_info === "true") {
         conditionClauses.push(`((email IS NOT NULL AND email != '') OR (phone IS NOT NULL AND phone != ''))`);
+      }
+
+      // My Contacts page: AI high-priority leads only (is_priority = true)
+      if (is_priority === "true") {
+        conditionClauses.push(`is_priority = TRUE`);
       }
 
       // Lead Search–style meta filters (same fields as Lead Search page)
@@ -1763,6 +1769,40 @@ export async function bulkRejectLeads(req, res) {
 
   } catch (err) {
     console.error('❌ Bulk reject error:', err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// POST /api/leads/back-to-review
+// My Contacts: move leads back to review (is_priority = false, review_status = 'to_be_reviewed'). Does NOT change connection_degree.
+export async function backToReview(req, res) {
+  try {
+    const { leadIds } = req.body;
+    if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+      return res.status(400).json({ error: 'leadIds array is required' });
+    }
+    const result = await pool.query(
+      `UPDATE leads
+       SET is_priority = FALSE,
+           review_status = 'to_be_reviewed',
+           approved_at = NULL,
+           approved_by = NULL,
+           rejected_reason = NULL,
+           rejected_at = NULL,
+           rejected_by = NULL,
+           updated_at = NOW()
+       WHERE id = ANY($1)
+       RETURNING id`,
+      [leadIds]
+    );
+    console.log(`↩ Back to Review: ${result.rowCount} leads (My Contacts)`);
+    return res.json({
+      success: true,
+      message: `Moved ${result.rowCount} leads back to review`,
+      count: result.rowCount,
+    });
+  } catch (err) {
+    console.error('backToReview error:', err);
     res.status(500).json({ error: err.message });
   }
 }
