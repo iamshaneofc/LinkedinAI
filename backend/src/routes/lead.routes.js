@@ -16,6 +16,7 @@ import {
     bulkDeleteLeads,
     enrichLead,
     enrichLeadsBatch,
+    hunterEmailBatch,
     getLeadEnrichment,
     getEnrichedLeads,
     bulkEnrichAndPersonalize,
@@ -64,6 +65,7 @@ router.post("/import", importLeads);
 router.post("/import-csv", upload.single('csvFile'), importLeadsFromCSV);
 router.post("/import-excel", upload.single('excelFile'), importLeadsFromExcel);
 router.post("/enrich-batch", enrichLeadsBatch);
+router.post("/hunter-email-batch", hunterEmailBatch);
 router.post("/bulk-enrich-personalize", bulkEnrichAndPersonalize);
 router.post("/:id/enrich", enrichLead);
 router.post("/:id/generate-message", generatePersonalizedMessage);

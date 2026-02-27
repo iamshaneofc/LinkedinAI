@@ -860,6 +860,46 @@ export async function enrichLeadsBatch(req, res) {
   }
 }
 
+// POST /api/leads/hunter-email-batch
+// Hunter.io only: find/verify emails for selected leads (no profile enrichment).
+export async function hunterEmailBatch(req, res) {
+  try {
+    const { leadIds } = req.body || {};
+
+    if (!leadIds || (Array.isArray(leadIds) && leadIds.length === 0)) {
+      const { default: hunterProgressiveService } = await import("../services/hunter-progressive.service.js");
+      try {
+        const result = await hunterProgressiveService.startBatch();
+        return res.json({ ...result, message: result.message || "Started Hunter.io email lookup for up to 50 leads" });
+      } catch (err) {
+        return res.status(500).json({ error: "Failed to start Hunter email batch" });
+      }
+    }
+
+    if (!Array.isArray(leadIds)) {
+      return res.status(400).json({ error: "leadIds must be an array of lead IDs" });
+    }
+
+    const { default: enrichmentService } = await import("../services/enrichment.service.js");
+    const results = await enrichmentService.enrichLeadsHunterOnly(leadIds);
+
+    const successCount = results.filter((r) => r.success).length;
+    return res.json({
+      success: true,
+      status: successCount === leadIds.length ? "completed" : "completed_with_errors",
+      count: leadIds.length,
+      successCount,
+      results,
+      message: successCount === leadIds.length
+        ? `Email lookup completed for ${successCount} leads.`
+        : `Email lookup completed for ${successCount} of ${leadIds.length} leads.`,
+    });
+  } catch (err) {
+    console.error("Hunter email batch error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
 // GET /api/leads/:id/enrichment
 export async function getLeadEnrichment(req, res) {
   try {

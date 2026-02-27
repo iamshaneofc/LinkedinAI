@@ -160,9 +160,37 @@ export const ContentItemService = {
      * → Backend generates LinkedIn-ready post
      * → Applies CTA template
      * → Saves as IDEA
+     * Supports: existing content_sources (source_id), or inline news article (source_url/source_title/source_summary).
      */
     async generateIdea({ source_id, persona, industry, objective, cta_type_id, topic, source_title, source_url, source_summary }) {
         console.log(`🤖 ContentEngine: Generating IDEA for persona=${persona}, industry=${industry}, objective=${objective}`);
+
+        let effectiveSourceId = source_id || null;
+        let effectiveSourceTitle = source_title || null;
+        let effectiveSourceUrl = source_url || null;
+        let effectiveSourceSummary = source_summary || null;
+
+        // If inline news article data provided, create or reuse a news_article content source and link to it
+        if (effectiveSourceUrl && !effectiveSourceId) {
+            const name = effectiveSourceTitle || 'News Article';
+            const created = await ContentSourceService.create({
+                name: name.substring(0, 255),
+                type: 'news_article',
+                url: effectiveSourceUrl,
+                active: true
+            });
+            effectiveSourceId = created.id;
+            effectiveSourceTitle = effectiveSourceTitle || name;
+        }
+        // If only source_id provided, load source to get url/title for the AI prompt
+        else if (effectiveSourceId) {
+            const res = await pool.query('SELECT id, name, url FROM content_sources WHERE id = $1', [effectiveSourceId]);
+            const row = res.rows[0];
+            if (row) {
+                effectiveSourceTitle = effectiveSourceTitle || row.name || null;
+                effectiveSourceUrl = effectiveSourceUrl || row.url || null;
+            }
+        }
 
         // Fetch CTA template
         let ctaText = '';
@@ -172,11 +200,11 @@ export const ContentItemService = {
         }
 
         // Build AI prompt context
-        const topicContext = topic || source_title || 'industry trends';
+        const topicContext = topic || effectiveSourceTitle || 'industry trends';
         const promptData = {
             original_title: topicContext,
-            source_url: source_url || '',
-            summary: source_summary || `A LinkedIn post for ${persona} in ${industry} focused on ${objective}`
+            source_url: effectiveSourceUrl || '',
+            summary: effectiveSourceSummary || `A LinkedIn post for ${persona} in ${industry} focused on ${objective}`
         };
 
         let generatedContent = '';
@@ -220,7 +248,7 @@ export const ContentItemService = {
             `INSERT INTO content_items 
                 (source_id, title, generated_content, edited_content, persona, industry, objective, cta_type, status)
              VALUES ($1, $2, $3, $3, $4, $5, $6, $7, 'IDEA') RETURNING *`,
-            [source_id || null, topicContext, generatedContent, persona, industry, objective, cta_type_id || null]
+            [effectiveSourceId, topicContext, generatedContent, persona, industry, objective, cta_type_id || null]
         );
 
         await this._logTransition(res.rows[0].id, null, 'IDEA', 'Created via AI generation');

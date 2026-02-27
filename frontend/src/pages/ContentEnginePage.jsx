@@ -92,6 +92,7 @@ function GenerateModal({ sources, ctaTemplates, onClose, onCreated }) {
     const [form, setForm] = useState({
         source_id: '', persona: '', industry: '',
         objective: 'thought_leadership', cta_type_id: '', topic: '',
+        news_article_url: '', news_article_title: '', news_article_summary: '',
     });
     const [loading, setLoading] = useState(false);
     // Dual-variant picker state
@@ -106,7 +107,17 @@ function GenerateModal({ sources, ctaTemplates, onClose, onCreated }) {
         }
         setLoading(true);
         try {
-            const payload = { ...form, cta_type_id: form.cta_type_id || null, source_id: form.source_id || null };
+            const payload = {
+                ...form,
+                cta_type_id: form.cta_type_id || null,
+                source_id: form.news_article_url.trim() ? null : (form.source_id || null),
+                source_url: form.news_article_url.trim() || null,
+                source_title: form.news_article_title.trim() || null,
+                source_summary: form.news_article_summary.trim() || null,
+            };
+            delete payload.news_article_url;
+            delete payload.news_article_title;
+            delete payload.news_article_summary;
             // Generate 2 in parallel
             const [r1, r2] = await Promise.all([
                 axios.post('/api/sow/engine/items/generate', payload),
@@ -214,6 +225,18 @@ function GenerateModal({ sources, ctaTemplates, onClose, onCreated }) {
                         {sources.filter(s => s.active).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                 </Field>
+                <div className="space-y-2 rounded-lg border border-border/50 bg-muted/10 p-3">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                        <Newspaper className="w-3.5 h-3.5 text-indigo-400" />
+                        News Article (optional)
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">Base your post on a news article — paste URL and optionally title or summary. AI will use it for context.</p>
+                    <div className="grid grid-cols-1 gap-2">
+                        <Input placeholder="Article URL (e.g. https://...)" value={form.news_article_url} onChange={e => set('news_article_url', e.target.value)} className="border-border/60 text-sm" />
+                        <Input placeholder="Article title (optional)" value={form.news_article_title} onChange={e => set('news_article_title', e.target.value)} className="border-border/60 text-sm" />
+                        <textarea placeholder="Summary or key points (optional)" value={form.news_article_summary} onChange={e => set('news_article_summary', e.target.value)} rows={2} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground border-border/60 resize-none focus:outline-none focus:ring-2 focus:ring-primary/20" />
+                    </div>
+                </div>
                 {/* Dual generate note */}
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-500/8 border border-indigo-500/20">
                     <Sparkles className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
@@ -260,11 +283,12 @@ function AddSourceModal({ onClose, onCreated }) {
                         <option value="manual">Manual</option>
                         <option value="rss">RSS Feed</option>
                         <option value="keyword">Keyword Monitor</option>
+                        <option value="news_article">News Article</option>
                     </select>
                 </Field>
-                {form.type === 'rss' && (
-                    <Field label="RSS URL">
-                        <Input value={form.url} onChange={e => set('url', e.target.value)} placeholder="https://..." className="border-border/60" />
+                {(form.type === 'rss' || form.type === 'news_article') && (
+                    <Field label={form.type === 'news_article' ? 'Article URL' : 'RSS URL'}>
+                        <Input value={form.url} onChange={e => set('url', e.target.value)} placeholder={form.type === 'news_article' ? 'https://...' : 'https://...'} className="border-border/60" />
                     </Field>
                 )}
                 <div className="grid grid-cols-2 gap-4">
@@ -738,7 +762,7 @@ function ItemDetailModal({ item, ctaTemplates, onClose, onUpdated, onDeleted }) 
                                 style={{ backgroundColor: ns.color, color: '#fff' }}
                             >
                                 <Icon className="w-3 h-3" />
-                                {isPhantom ? 'Send to Phantom' : `Move to ${s}`}
+                                {isPhantom ? 'Publish to LinkedIn' : `Move to ${s}`}
                             </Button>
                         );
                     })}
@@ -746,7 +770,7 @@ function ItemDetailModal({ item, ctaTemplates, onClose, onUpdated, onDeleted }) 
                     {['APPROVED', 'SCHEDULED'].includes(item.status) && (
                         <Button size="sm" variant="outline" onClick={sendToPhantom} disabled={sending} className="gap-1.5 border-purple-500/40 text-purple-400 hover:bg-purple-500/10">
                             {sending ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
-                            {sending ? 'Sending...' : 'Send to Phantom Now'}
+                            {sending ? 'Sending...' : 'Publish to LinkedIn now'}
                         </Button>
                     )}
 

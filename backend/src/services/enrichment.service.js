@@ -374,6 +374,24 @@ class EnrichmentService {
     /**
      * Batch enrich multiple leads
      */
+    /**
+     * Hunter-only: find/verify emails for given leads (no profile enrichment).
+     */
+    async enrichLeadsHunterOnly(leadIds) {
+        const results = [];
+        for (const leadId of leadIds) {
+            try {
+                const result = await this.enrichWithHunter(leadId);
+                results.push({ success: true, leadId, ...(result && { result }) });
+                await new Promise(resolve => setTimeout(resolve, 1100)); // rate limit
+            } catch (error) {
+                logger.error(`Hunter-only failed for lead ${leadId}: ${error.message}`);
+                results.push({ success: false, leadId, error: error.message });
+            }
+        }
+        return results;
+    }
+
     async enrichLeads(leadIds) {
         console.log(`📦 Batch enriching ${leadIds.length} leads`);
 

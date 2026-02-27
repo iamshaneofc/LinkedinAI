@@ -430,11 +430,6 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             return;
         }
 
-        if (isBulkEnrich) {
-            handleBulkEnrichAndPersonalize();
-            return;
-        }
-
         try {
             const selectedLeadIds = Array.from(selectedLeads);
             const notApproved = leads.filter(l => selectedLeads.has(l.id) && l.review_status !== 'approved');
@@ -463,44 +458,6 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                 const errorMsg = data?.error || error.message || 'Failed to add leads to campaign';
                 addToast(`Error: ${errorMsg}`, 'error');
             }
-        }
-    };
-
-    const handleBulkEnrichAndPersonalize = async () => {
-        const leadIds = Array.from(selectedLeads);
-        if (leadIds.length === 0) return;
-
-        try {
-            setEnriching(true);
-            setShowCampaignModal(false);
-            addToast(`🚀 Starting bulk enrichment and personalization for ${leadIds.length} leads...`, 'info');
-
-            const res = await axios.post('/api/leads/bulk-enrich-personalize', {
-                leadIds,
-                campaignId: selectedCampaignId
-            });
-
-            console.log('Bulk enrich response:', res.data);
-
-            const results = res.data.results || {};
-            const message = `Enrichment complete! ${results.enriched || 0} enriched, ${results.generated || 0} AI messages created.`;
-
-            addToast(message, 'success');
-            setSelectedLeads(new Set());
-            fetchLeads();
-
-            // Optional: navigate to campaign to see results
-            if (window.confirm(`${message}\n\nWould you like to view the campaign approvals?`)) {
-                navigate(`/campaigns/${selectedCampaignId}`);
-            }
-        } catch (error) {
-            console.error('Bulk enrich failed:', error);
-            const errorMsg = error.response?.data?.error || error.message || 'Failed to bulk enrich';
-            addToast(`Error: ${errorMsg}`, 'error');
-        } finally {
-            setEnriching(false);
-            setIsBulkEnrich(false);
-            setSelectedCampaignId('');
         }
     };
 
@@ -1316,23 +1273,23 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
         const leadIds = Array.from(selectedLeads);
         try {
             setEnriching(true);
-            addToast(`🚀 Starting to enrich contact info for ${leadIds.length > 0 ? leadIds.length : 'all missing'} leads...`, 'info');
+            addToast(`🔍 Finding emails via Hunter.io for ${leadIds.length > 0 ? leadIds.length : 'all'} leads...`, 'info');
 
-            const res = await axios.post('/api/leads/enrich-batch', { leadIds });
+            const res = await axios.post('/api/leads/hunter-email-batch', { leadIds });
 
             if (res.data.status === 'enrichment_started') {
-                addToast(res.data.message || 'Started enrichment in background', 'success');
+                addToast(res.data.message || 'Hunter.io email lookup started in background', 'success');
                 setSelectedLeads(new Set());
-                // Refresh to see 'processing' status if implemented in list
                 setTimeout(fetchLeads, 1500);
             } else if (res.data.success) {
-                addToast('Enrichment batch completed', 'success');
+                const msg = res.data.message || `Email lookup completed for ${res.data.successCount ?? res.data.count ?? 0} leads.`;
+                addToast(msg, 'success');
                 setSelectedLeads(new Set());
                 fetchLeads();
             }
         } catch (error) {
-            console.error('Scrape failed:', error);
-            const errorMsg = error.response?.data?.error || error.message || 'Enrichment failed';
+            console.error('Hunter email batch failed:', error);
+            const errorMsg = error.response?.data?.error || error.message || 'Email lookup failed';
             addToast(`Error: ${errorMsg}`, 'error');
         } finally {
             setEnriching(false);
@@ -1458,7 +1415,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                     {enriching && (
                                         <span className="inline-flex items-center gap-1.5 text-xs text-primary font-medium animate-pulse">
                                             <Loader2 className="h-3 w-3 animate-spin" />
-                                            Enrichment in progress...
+                                            Finding emails...
                                         </span>
                                     )}
                                     {usePreferences && (
@@ -1478,7 +1435,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                             className="h-10 w-10 border-primary/50 text-primary hover:bg-primary/10 shadow-sm"
                                             onClick={handleManualScrape}
                                             disabled={enriching}
-                                            title="Enrich Contact Info (Hunter.io)"
+                                            title="Find emails (Hunter.io)"
                                         >
                                             <Contact className={cn("h-4 w-4", enriching && "animate-spin")} />
                                         </Button>
@@ -1924,7 +1881,6 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                     <div className="flex gap-2">
                                         {/* Bulk Actions available in all tabs for efficiency */}
                                         <Button size="sm" variant="default" onClick={() => {
-                                            setIsBulkEnrich(false);
                                             setShowCampaignModal(true);
                                         }}>
                                             Add to Campaign
@@ -1966,22 +1922,6 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                             </DropdownMenu>
                                         )}
 
-                                        {reviewStatusTab !== 'rejected' && (
-                                            <Button
-                                                size="sm"
-                                                variant="outline"
-                                                className="bg-background gap-2"
-                                                onClick={() => {
-                                                    setIsBulkEnrich(true);
-                                                    setShowCampaignModal(true);
-                                                }}
-                                                disabled={enriching}
-                                            >
-                                                <Sparkles className={cn("h-4 w-4", enriching && "animate-spin")} />
-                                                Enrich & Personalize
-                                            </Button>
-                                        )}
-
                                         {reviewStatusTab === 'rejected' && (
                                             <Button size="sm" variant="destructive" onClick={handleBulkDeleteRejected} disabled={deleting}>
                                                 <Trash2 className="h-4 w-4 mr-2" />
@@ -2009,18 +1949,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                             <div className="flex items-center gap-3">
                                 <Loader2 className="h-5 w-5 text-primary animate-spin" />
                                 <p className="text-sm font-medium text-primary">
-                                    Enriching leads via Data Source and generating AI messages... This may take a few minutes.
-                                </p>
-                            </div>
-                        </div>
-                    )}
-
-                    {enriching && (
-                        <div className="mb-4 p-4 bg-primary/10 border border-primary/20 rounded-lg animate-pulse">
-                            <div className="flex items-center gap-3">
-                                <Loader2 className="h-5 w-5 text-primary animate-spin" />
-                                <p className="text-sm font-medium text-primary">
-                                    Enriching leads via Data Source and generating AI messages... This may take a few minutes.
+                                    Finding emails for leads... This may take a few minutes.
                                 </p>
                             </div>
                         </div>
@@ -2143,7 +2072,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                                                 {lead.enrichment_status === 'completed' && lead.email && (
                                                                     <div className="flex items-center gap-1.5 text-[10px] text-green-600 font-bold">
                                                                         <Check className="h-2.5 w-2.5" />
-                                                                        Hunter Enriched
+                                                                        Email found
                                                                     </div>
                                                                 )}
                                                             </div>
@@ -2295,28 +2224,13 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                     <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-20 overflow-y-auto">
                         <Card className="w-full max-w-md shadow-2xl border-primary/20 animate-in zoom-in-95 duration-200">
                             <CardHeader>
-                                <CardTitle>{isBulkEnrich ? 'Bulk Enrich & Personalize' : 'Add Leads to Campaign'}</CardTitle>
+                                <CardTitle>Add Leads to Campaign</CardTitle>
                                 <CardDescription>
-                                    {isBulkEnrich
-                                        ? `Select a campaign to generate personalized AI messages for ${selectedLeads.size} leads.`
-                                        : `Select a campaign to assign the ${selectedLeads.size} selected leads.`
-                                    }
+                                    Select a campaign to assign the {selectedLeads.size} selected leads.
                                     <span className="block mt-1.5 text-muted-foreground/90">Max 10 leads per campaign.</span>
                                 </CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4">
-                                {isBulkEnrich && (
-                                    <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg text-xs text-blue-200">
-                                        <p className="font-bold flex items-center gap-1 mb-1">
-                                            <Sparkles className="h-3 w-3" /> AI Enrichment Flow:
-                                        </p>
-                                        <ul className="list-disc list-inside space-y-1">
-                                            <li>Enrich full LinkedIn bio & activity via Data Source</li>
-                                            <li>Generate unique personalized message via OpenAI/Ollama</li>
-                                            <li>Add messages to Campaign Approval Queue</li>
-                                        </ul>
-                                    </div>
-                                )}
                                 <div className="space-y-2">
                                     <label className="text-xs font-bold uppercase text-muted-foreground tracking-widest">Select Campaign</label>
                                     <select
@@ -2331,12 +2245,9 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                     </select>
                                 </div>
                                 <div className="flex gap-2 justify-end pt-4">
-                                    <Button variant="ghost" onClick={() => {
-                                        setShowCampaignModal(false);
-                                        setIsBulkEnrich(false);
-                                    }}>Cancel</Button>
+                                    <Button variant="ghost" onClick={() => setShowCampaignModal(false)}>Cancel</Button>
                                     <Button onClick={handleAddToCampaign} disabled={!selectedCampaignId} className="bg-primary hover:bg-primary/90">
-                                        {isBulkEnrich ? 'Start Enrichment' : `Add ${selectedLeads.size} Leads`}
+                                        Add {selectedLeads.size} Leads
                                     </Button>
                                 </div>
                             </CardContent>
