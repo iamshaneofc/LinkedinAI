@@ -374,7 +374,7 @@ const SettingsPage = () => {
         preference_tiers: preferences.preference_tiers,
         preference_active: preferences.preference_active,
       });
-      addToast("Preferences saved. Leads are being rescored.", "success");
+      addToast("Preferences saved. Leads are being rescored — dashboard Primary/Secondary/Tertiary counts will update in a few seconds.", "success");
     } catch (error) {
       addToast("Failed to save preferences", "error");
     } finally {
@@ -397,7 +397,7 @@ const SettingsPage = () => {
           ...prev,
           preference_tiers: res.data.suggested,
         }));
-        addToast("Profile analyzed. Suggested tiers filled. Edit and save.", "success");
+        addToast("Profile analyzed. All three tiers filled with 3–5 options each. Edit if needed, then Save Preferences.", "success");
       }
     } catch (error) {
       addToast(error.response?.data?.error || "Analyze failed", "error");
@@ -1262,7 +1262,7 @@ const SettingsPage = () => {
                   Analyze
                 </Button>
               </div>
-              <p className="text-[10px] text-muted-foreground">Profile URL is required for Save. Analyze fills Primary tier from your profile; other fields are optional.</p>
+              <p className="text-[10px] text-muted-foreground">Profile URL is required for Save. Analyze fills Primary, Secondary, and Tertiary with 3–5 options each (no duplicates). Edit if needed, then Save.</p>
             </div>
             {(() => {
               const TITLE_OPTIONS = ["CEO", "CTO", "CFO", "Director", "Manager", "VP", "Founder", "Head of", "Lead", "Engineer", "Analyst", "Consultant", "Specialist"];

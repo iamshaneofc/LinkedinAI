@@ -303,11 +303,9 @@ function defaultQualityScore(lead) {
 
 /**
  * Recalculate scores for all leads.
- * - Connection degree is NEVER used for tier — only profile/preference-based scoring and rank.
- * - Default (no saved preferences): score = profile completeness (title, company, email, phone), then
- *   rank all leads and assign top 33% primary, next 33% secondary, rest tertiary.
- * - With Save Preferences: score from profile/tiers, then same 33/33/34 assignment.
- * - manual_tier is cleared so dashboard hierarchy reflects this logic only.
+ * - Default (no tier fields saved): score = profile completeness, then assign Primary/Secondary/Tertiary by rank (dynamic % bands).
+ * - When user has saved tier fields (Save Preferences): hierarchy is set from those fields — leads matching Primary → primary, Secondary → secondary, Tertiary → tertiary; no match → tertiary.
+ * - manual_tier is cleared so dashboard reflects this logic.
  */
 export async function recalculateAllScores() {
   const prefs = await loadPreferences();
@@ -318,7 +316,8 @@ export async function recalculateAllScores() {
     (tiers.secondary && (tiers.secondary.titles?.length || tiers.secondary.industries?.length || tiers.secondary.company_sizes?.length)) ||
     (tiers.tertiary && (tiers.tertiary.titles?.length || tiers.tertiary.industries?.length || tiers.tertiary.company_sizes?.length))
   );
-  const useProfileScoring = Boolean(prefs?.preference_active && hasTierCriteria);
+  // When user has saved tier fields: set hierarchy by those fields. Otherwise: keep default (percentile) logic.
+  const useProfileScoring = Boolean(hasTierCriteria);
 
   let offset = 0;
   const PAGE = 1000;
@@ -355,23 +354,31 @@ export async function recalculateAllScores() {
 
   if (allUpdates.length === 0) return { updated: 0 };
 
-  // Sort by score desc (then id). Tiers assigned by score rank with dynamic bands.
-  // Primary = top 20–40%, Secondary = next 30–50%, Tertiary = rest 40–50%. Picked at random each rescore so counts vary.
-  allUpdates.sort((a, b) => {
-    if (b.preference_score !== a.preference_score) return b.preference_score - a.preference_score;
-    return a.id - b.id;
-  });
-  const total = allUpdates.length;
-  const { pctPrimary, pctSecondary } = getDynamicTierPercentages();
-  const primaryCount = Math.max(1, Math.floor(total * pctPrimary));
-  const secondaryCount = Math.max(1, Math.floor(total * pctSecondary));
-  allUpdates.forEach((u, idx) => {
-    if (idx < primaryCount) u.preference_tier = 'primary';
-    else if (idx < primaryCount + secondaryCount) u.preference_tier = 'secondary';
-    else u.preference_tier = 'tertiary';
-  });
+  let finalUpdates = allUpdates;
+  if (useProfileScoring) {
+    // Use actual matched tier from preferences; leads that match no tier become tertiary so dashboard totals add up.
+    finalUpdates = allUpdates.map((u) => ({
+      ...u,
+      preference_tier: u.preference_tier || 'tertiary',
+    }));
+  } else {
+    // No tier criteria: assign by score rank (dynamic percentile bands).
+    allUpdates.sort((a, b) => {
+      if (b.preference_score !== a.preference_score) return b.preference_score - a.preference_score;
+      return a.id - b.id;
+    });
+    const total = allUpdates.length;
+    const { pctPrimary, pctSecondary } = getDynamicTierPercentages();
+    const primaryCount = Math.max(1, Math.floor(total * pctPrimary));
+    const secondaryCount = Math.max(1, Math.floor(total * pctSecondary));
+    finalUpdates = allUpdates.map((u, idx) => {
+      if (idx < primaryCount) return { ...u, preference_tier: 'primary' };
+      if (idx < primaryCount + secondaryCount) return { ...u, preference_tier: 'secondary' };
+      return { ...u, preference_tier: 'tertiary' };
+    });
+  }
 
-  allUpdates.forEach(u => {
+  finalUpdates.forEach(u => {
     const { isPriority, reviewStatus } = applyPriorityRule(u.preference_score, u.preference_tier, prefs ?? null, null);
     u.is_priority = isPriority;
     u.review_status = reviewStatus;
@@ -380,7 +387,7 @@ export async function recalculateAllScores() {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    for (const u of allUpdates) {
+    for (const u of finalUpdates) {
       const reviewStatus = String(u.review_status || '');
       await client.query(
         `UPDATE leads
@@ -396,8 +403,10 @@ export async function recalculateAllScores() {
     }
     await client.query('COMMIT');
     const mode = useProfileScoring ? 'saved profile (preference active)' : 'default quality score';
-    const pctTertiary = (100 - Math.round(pctPrimary * 100) - Math.round(pctSecondary * 100));
-    console.log(`[scoring] Recalculated ${allUpdates.length} leads: tiers by score (dynamic ${Math.round(pctPrimary * 100)}% / ${Math.round(pctSecondary * 100)}% / ${pctTertiary}%). Mode: ${mode}.`);
+    const tierSummary = useProfileScoring
+      ? `${finalUpdates.filter(u => u.preference_tier === 'primary').length} primary / ${finalUpdates.filter(u => u.preference_tier === 'secondary').length} secondary / ${finalUpdates.filter(u => u.preference_tier === 'tertiary').length} tertiary`
+      : 'dynamic % bands';
+    console.log(`[scoring] Recalculated ${finalUpdates.length} leads: ${tierSummary}. Mode: ${mode}.`);
     try {
       await pool.query('UPDATE leads SET manual_tier = NULL WHERE manual_tier IS NOT NULL');
     } catch (_) {
@@ -411,7 +420,7 @@ export async function recalculateAllScores() {
     client.release();
   }
 
-  return { updated: allUpdates.length };
+  return { updated: finalUpdates.length };
 }
 
 /**

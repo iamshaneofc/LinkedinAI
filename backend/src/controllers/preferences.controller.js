@@ -175,6 +175,58 @@ export async function rescoreLeads(req, res) {
 }
 
 // POST /api/preferences/analyze — AI suggest tiered preferences from LinkedIn Profile URL
+// Fills Primary, Secondary, and Tertiary with 3–5 options each; no value repeated across tiers.
+const TITLE_OPTIONS = ['CEO', 'CTO', 'CFO', 'Director', 'Manager', 'VP', 'Founder', 'Head of', 'Lead', 'Engineer', 'Analyst', 'Consultant', 'Specialist'];
+const INDUSTRY_OPTIONS = [
+    'Technology, Information and Media', 'Financial Services', 'Professional Services', 'Manufacturing', 'Retail', 'Education',
+    'Hospitals and Health Care', 'Marketing & Advertising', 'Construction', 'Real Estate and Equipment Rental Services', 'Other',
+];
+const SIZE_OPTIONS = ['1-10', '11-50', '51-200', '201-500', '500+'];
+
+function normaliseForDedup(s) {
+    return String(s).toLowerCase().trim();
+}
+
+/** Pick up to `count` values from `pool` that are not in `exclude` (normalised). Prefer values that contain or are contained in `preferMatch`. */
+function pickFromPool(pool, count, exclude = [], preferMatch = '') {
+    const out = [];
+    const excludeArr = Array.isArray(exclude) ? exclude : [...(exclude || [])];
+    const excluded = new Set(excludeArr.map(normaliseForDedup));
+    const prefer = normaliseForDedup(preferMatch || '');
+    const poolCopy = [...pool];
+    // Prefer items that overlap with prefer (e.g. profile title "Software Engineer" -> prefer "Engineer")
+    if (prefer) {
+        poolCopy.sort((a, b) => {
+            const na = normaliseForDedup(a);
+            const nb = normaliseForDedup(b);
+            const matchA = na && (na === prefer || na.includes(prefer) || prefer.includes(na));
+            const matchB = nb && (nb === prefer || nb.includes(prefer) || prefer.includes(nb));
+            if (matchA && !matchB) return -1;
+            if (!matchA && matchB) return 1;
+            return 0;
+        });
+    }
+    for (const v of poolCopy) {
+        if (out.length >= count) break;
+        const n = normaliseForDedup(v);
+        if (!n || excluded.has(n)) continue;
+        excluded.add(n);
+        out.push(v);
+    }
+    return out;
+}
+
+/** Ensure 3–5 items per category; fill from pool if needed. */
+function ensureCount(arr, pool, minCount, excludeSet, prefer) {
+    const used = new Set((arr || []).map(normaliseForDedup));
+    if (excludeSet) excludeSet.forEach(u => used.add(normaliseForDedup(u)));
+    const current = [...(arr || [])];
+    const need = Math.max(0, minCount - current.length);
+    if (need === 0) return current.slice(0, 5);
+    const added = pickFromPool(pool, need, used, prefer);
+    return [...current, ...added].slice(0, 5);
+}
+
 export async function analyzeProfileForPreferences(req, res) {
     try {
         const { linkedin_profile_url } = req.body || {};
@@ -202,14 +254,55 @@ export async function analyzeProfileForPreferences(req, res) {
             console.warn('[preferences] Analyze profile fetch failed:', e.message);
         }
 
-        const titles = profileMeta.title ? [profileMeta.title] : [];
-        const industries = profileMeta.industry ? [profileMeta.industry] : [];
-        const companySizes = profileMeta.companySize ? [String(profileMeta.companySize)] : [];
+        const profileTitle = profileMeta.title ? String(profileMeta.title).trim() : '';
+        const profileIndustry = profileMeta.industry ? String(profileMeta.industry).trim() : '';
+        const profileSize = profileMeta.companySize ? String(profileMeta.companySize).trim() : '';
+
+        // Primary: 3–5 each, starting from profile (then fill from pools)
+        const primaryTitles = ensureCount(
+            profileTitle ? [profileTitle] : [],
+            TITLE_OPTIONS,
+            3,
+            [],
+            profileTitle
+        );
+        const primaryIndustries = ensureCount(
+            profileIndustry ? [profileIndustry] : [],
+            INDUSTRY_OPTIONS,
+            3,
+            [],
+            profileIndustry
+        );
+        const primarySizes = ensureCount(
+            profileSize ? [profileSize] : [],
+            SIZE_OPTIONS,
+            3,
+            [],
+            profileSize
+        );
+
+        const usedTitles = new Set(primaryTitles.map(normaliseForDedup));
+        const usedIndustries = new Set(primaryIndustries.map(normaliseForDedup));
+        const usedSizes = new Set(primarySizes.map(normaliseForDedup));
+
+        // Secondary: 3–5 each, no overlap with primary
+        const secondaryTitles = pickFromPool(TITLE_OPTIONS, 4, usedTitles);
+        secondaryTitles.forEach(t => usedTitles.add(normaliseForDedup(t)));
+        const secondaryIndustries = pickFromPool(INDUSTRY_OPTIONS, 4, usedIndustries);
+        secondaryIndustries.forEach(i => usedIndustries.add(normaliseForDedup(i)));
+        const secondarySizes = pickFromPool(SIZE_OPTIONS, 4, usedSizes);
+        secondarySizes.forEach(s => usedSizes.add(normaliseForDedup(s)));
+
+        // Tertiary: 3–5 each, no overlap with primary or secondary
+        const tertiaryTitles = pickFromPool(TITLE_OPTIONS, 4, usedTitles);
+        tertiaryTitles.forEach(t => usedTitles.add(normaliseForDedup(t)));
+        const tertiaryIndustries = pickFromPool(INDUSTRY_OPTIONS, 4, usedIndustries);
+        const tertiarySizes = pickFromPool(SIZE_OPTIONS, 4, usedSizes);
 
         const suggested = validatePreferenceTiers({
-            primary: { titles, industries, company_sizes: companySizes },
-            secondary: { titles: [], industries: [], company_sizes: [] },
-            tertiary: { titles: [], industries: [], company_sizes: [] },
+            primary: { titles: primaryTitles, industries: primaryIndustries, company_sizes: primarySizes },
+            secondary: { titles: secondaryTitles, industries: secondaryIndustries, company_sizes: secondarySizes },
+            tertiary: { titles: tertiaryTitles, industries: tertiaryIndustries, company_sizes: tertiarySizes },
         }) || DEFAULT_TIERS;
 
         return res.json({
