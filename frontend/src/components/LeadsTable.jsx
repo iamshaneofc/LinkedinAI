@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useTimeFilter } from '../context/TimeFilterContext';
 import PageGuide from './PageGuide';
 import axios from 'axios';
 import { Search, MoreVertical, RefreshCw, Linkedin, Trash2, Edit2, Download, Filter, ChevronDown, ChevronUp, Loader2, Sparkles, MapPin, Building2, Briefcase, Target, Database, Eye, Check, X, Mail, Phone, UserPlus, Users, Network, Contact, Upload, AlertTriangle, Columns3, GripVertical, Clock } from 'lucide-react';
@@ -115,8 +116,44 @@ export default function LeadsTable({
         createdTo: searchParams.get('createdTo'),
     });
 
-    // Time filter (daily/weekly/monthly/yearly) is dashboard-only; CRM/leads do not use it.
-    // Date range here comes only from URL (createdFrom/createdTo) or user-set filters.
+    // Time filter (daily/weekly/monthly/yearly): shared with Dashboard. When on CRM (My Contacts, Review Leads, Prospects)
+    // and URL has no date params, apply the current period so list matches dashboard timeframe.
+    const { period, month, year } = useTimeFilter();
+
+    // Apply time filter as default date range on CRM when URL has no createdFrom/createdTo
+    useEffect(() => {
+        if (!applyDefaultDateRange) return;
+        if (searchParams.get('createdFrom') || searchParams.get('createdTo')) return;
+
+        const now = new Date();
+        let start, end;
+        if (period === "daily") {
+            start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        } else if (period === "weekly") {
+            const day = now.getDay() || 7;
+            start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day + 1);
+            end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+        } else if (period === "monthly") {
+            start = new Date(year, month, 1);
+            end = new Date(year, month + 1, 1);
+        } else if (period === "yearly") {
+            start = new Date(year, 0, 1);
+            end = new Date(year + 1, 0, 1);
+        } else {
+            return;
+        }
+
+        const newFilters = {
+            ...metaFilters,
+            createdFrom: start.toISOString(),
+            createdTo: end.toISOString(),
+        };
+        setMetaFilters(newFilters);
+        fetchLeads(false, newFilters);
+        fetchStats({ metaFilters: newFilters });
+    }, [period, month, year, applyDefaultDateRange]);
+
     const [activeQuickFilters, setActiveQuickFilters] = useState([]);
     const [quickFilterOverrides, setQuickFilterOverrides] = useState({});
     const [editingQuickFilterId, setEditingQuickFilterId] = useState(null);
@@ -350,6 +387,15 @@ export default function LeadsTable({
         window.scrollTo(0, 0);
     }, [searchParams]); // Run whenever URL parameters change
 
+    // When landing with filter params in URL (e.g. from dashboard tier click), trigger one fetch
+    // since sync effect may not run (state already matches URL).
+    useEffect(() => {
+        if (searchParams.get('quality') || searchParams.get('createdFrom') || searchParams.get('createdTo')) {
+            fetchLeads(false);
+            fetchStats({ metaFilters });
+        }
+    }, []);
+
     // Initial load handling (Campaigns, Preferences, Branding)
     // We separate this to avoid re-fetching static data on URL changes
     useEffect(() => {
@@ -497,7 +543,32 @@ export default function LeadsTable({
     };
 
     const fetchLeads = async (append = false, overrideFilters = null, silent = false) => {
-        const filtersToUse = overrideFilters ?? metaFilters;
+        let filtersToUse = overrideFilters ?? metaFilters;
+
+        // When time filter applies (Dashboard + CRM), ensure every fetch uses the period range if no dates set
+        // so review tab / quick filters / other effects cannot override to "all leads"
+        if (applyDefaultDateRange && !filtersToUse.createdFrom && !filtersToUse.createdTo) {
+            const now = new Date();
+            let start, end;
+            if (period === "daily") {
+                start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+            } else if (period === "weekly") {
+                const day = now.getDay() || 7;
+                start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day + 1);
+                end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+            } else if (period === "monthly") {
+                start = new Date(year, month, 1);
+                end = new Date(year, month + 1, 1);
+            } else if (period === "yearly") {
+                start = new Date(year, 0, 1);
+                end = new Date(year + 1, 0, 1);
+            } else {
+                start = new Date(year, month, 1);
+                end = new Date(year, month + 1, 1);
+            }
+            filtersToUse = { ...filtersToUse, createdFrom: start.toISOString(), createdTo: end.toISOString() };
+        }
 
         // Legacy has_contact_info filter is disabled on non-contacts pages
         if (filtersToUse.hasContactInfo && !isMyContactsQuery) {

@@ -21,6 +21,16 @@ function ErrorHandler({ children }) {
         const interceptor = axios.interceptors.response.use(
             (response) => response,
             (error) => {
+                // Do not show toast or log for canceled/aborted requests (e.g. AbortController, nav away)
+                const isCanceled =
+                    axios.isCancel(error) ||
+                    error?.name === 'AbortError' ||
+                    error?.code === 'ERR_CANCELED' ||
+                    (error?.message && String(error.message).toLowerCase() === 'canceled');
+                if (isCanceled) {
+                    return Promise.reject(error);
+                }
+
                 // Extract error message
                 const errorMessage = error.response?.data?.error ||
                     error.response?.data?.message ||
