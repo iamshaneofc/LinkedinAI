@@ -157,6 +157,7 @@ export async function getLeads(req, res) {
       page = 1,
       limit = 50,
       filters, // New JSON param
+      ids,    // Deep link: comma-separated lead IDs (e.g. from notification)
       // Legacy params
       source,
       status,
@@ -187,7 +188,69 @@ export async function getLeads(req, res) {
     const conditionClauses = [];
     const params = [];
 
-    // Check for Advanced Filters first
+    // Deep link: show only these lead IDs (e.g. from notification click)
+    if (ids && typeof ids === 'string') {
+      const idList = ids.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n > 0);
+      if (idList.length > 0) {
+        conditionClauses.push(`id = ANY($${params.length + 1}::int[])`);
+        params.push(idList);
+      }
+    }
+
+    // Base filters: always apply when present (so source + hasEmail work for Imported Leads and with advanced filters)
+    if (source && source !== 'all') {
+      if (source.includes(',')) {
+        const sources = source.split(',').map(s => s.trim()).filter(s => s);
+        if (sources.length > 0) {
+          const placeholders = sources.map((_, i) => `$${params.length + i + 1}`).join(', ');
+          conditionClauses.push(`source IN (${placeholders})`);
+          params.push(...sources);
+        }
+      } else {
+        conditionClauses.push(`source = $${params.length + 1}`);
+        params.push(source);
+      }
+    }
+    if (status && status !== 'all') {
+      conditionClauses.push(`status = $${params.length + 1}`);
+      params.push(status);
+    }
+    if (review_status && review_status !== 'all' && !quality) {
+      conditionClauses.push(`review_status = $${params.length + 1}`);
+      params.push(review_status);
+    }
+    if (hasEmail === "true") {
+      conditionClauses.push(`(email IS NOT NULL AND TRIM(COALESCE(email, '')) != '')`);
+    }
+    if (hasLinkedin === "true") {
+      conditionClauses.push(`(linkedin_url IS NOT NULL AND TRIM(COALESCE(linkedin_url, '')) != '')`);
+    }
+    if (has_contact_info === "true") {
+      conditionClauses.push(`((email IS NOT NULL AND TRIM(COALESCE(email, '')) != '') OR (phone IS NOT NULL AND TRIM(COALESCE(phone, '')) != ''))`);
+    }
+    if (is_priority === "true") {
+      conditionClauses.push(`is_priority = TRUE`);
+    }
+    if (my_contacts === "true") {
+      conditionClauses.push(`is_priority = TRUE`);
+      conditionClauses.push(`(connection_degree ILIKE '%1st%' OR connection_degree ILIKE '%2nd%')`);
+    }
+    if (review_leads === "true") {
+      conditionClauses.push(`NOT (is_priority = TRUE AND (connection_degree ILIKE '%1st%' OR connection_degree ILIKE '%2nd%'))`);
+    }
+    if (prospects === "true") {
+      conditionClauses.push(`id IN (SELECT lead_id FROM campaign_leads)`);
+    }
+    if (createdFrom) {
+      conditionClauses.push(`created_at >= $${params.length + 1}`);
+      params.push(createdFrom);
+    }
+    if (createdTo) {
+      conditionClauses.push(`created_at <= $${params.length + 1}`);
+      params.push(createdTo);
+    }
+
+    // Advanced Filters (JSON): add on top of base filters
     if (filters) {
       try {
         const filterJSON = JSON.parse(filters);
@@ -197,73 +260,9 @@ export async function getLeads(req, res) {
         }
       } catch (e) {
         console.error("Failed to parse filters JSON", e);
-        // Fallback or error? For now, we'll continue and maybe matching other params will happen (unlikely to mix)
       }
     } else {
-      // --- Legacy / Simple Filter Logic ---
-
-      // Simple equality filters
-      if (source && source !== 'all') {
-        // Support comma-separated sources for imported leads filter
-        if (source.includes(',')) {
-          const sources = source.split(',').map(s => s.trim()).filter(s => s);
-          if (sources.length > 0) {
-            const placeholders = sources.map((_, i) => `$${params.length + i + 1}`).join(', ');
-            conditionClauses.push(`source IN (${placeholders})`);
-            params.push(...sources);
-          }
-        } else {
-          conditionClauses.push(`source = $${params.length + 1}`);
-          params.push(source);
-        }
-      }
-
-      if (status && status !== 'all') {
-        conditionClauses.push(`status = $${params.length + 1}`);
-        params.push(status);
-      }
-
-      // PHASE 4: Review status filter (omit when quality is set so list ranks ALL leads, then filters by tab to match review-stats counts)
-      if (review_status && review_status !== 'all' && !quality) {
-        conditionClauses.push(`review_status = $${params.length + 1}`);
-        params.push(review_status);
-      }
-
-      // Boolean-style filters
-      if (hasEmail === "true") {
-        conditionClauses.push(`email IS NOT NULL AND email != ''`);
-      }
-
-      if (hasLinkedin === "true") {
-        conditionClauses.push(`linkedin_url IS NOT NULL AND linkedin_url != ''`);
-      }
-
-      // My Contacts: leads with email OR phone
-      if (has_contact_info === "true") {
-        conditionClauses.push(`((email IS NOT NULL AND email != '') OR (phone IS NOT NULL AND phone != ''))`);
-      }
-
-      // My Contacts page: AI high-priority leads only (is_priority = true)
-      if (is_priority === "true") {
-        conditionClauses.push(`is_priority = TRUE`);
-      }
-      // My Contacts: priorities = 1st + 2nd connection only (Primary tier via industry / URL profile)
-      if (my_contacts === "true") {
-        conditionClauses.push(`is_priority = TRUE`);
-        conditionClauses.push(`(connection_degree ILIKE '%1st%' OR connection_degree ILIKE '%2nd%')`);
-      }
-
-      // Review Leads: all leads EXCEPT My Contacts (exclude is_priority + 1st/2nd degree so they appear in My Contacts only)
-      if (review_leads === "true") {
-        conditionClauses.push(`NOT (is_priority = TRUE AND (connection_degree ILIKE '%1st%' OR connection_degree ILIKE '%2nd%'))`);
-      }
-
-      // Prospects: leads that are in a campaign (pending, sent, replied, etc.) — any campaign_leads row
-      if (prospects === "true") {
-        conditionClauses.push(`id IN (SELECT lead_id FROM campaign_leads)`);
-      }
-
-      // Lead Search–style meta filters (same fields as Lead Search page)
+      // --- Simple search filters (title, location, company, industry, connection_degree) ---
       if (title && title.trim()) {
         conditionClauses.push(`title ILIKE $${params.length + 1}`);
         params.push(`%${title.trim()}%`);
@@ -323,16 +322,6 @@ export async function getLeads(req, res) {
         }
       }
 
-      // Date range filters
-      if (createdFrom) {
-        conditionClauses.push(`created_at >= $${params.length + 1}`);
-        params.push(createdFrom);
-      }
-
-      if (createdTo) {
-        conditionClauses.push(`created_at <= $${params.length + 1}`);
-        params.push(createdTo);
-      }
     }
 
     // Global Search (applies on top of filters)
@@ -359,6 +348,10 @@ export async function getLeads(req, res) {
           created_at DESC`;
       }
     } catch { /* preference_settings table may not exist yet — fall back gracefully */ }
+
+    // Priority leads on top (qualify-by-niche sets is_priority = true; My Contacts are already priority)
+    const baseOrder = orderClause.replace(/^ORDER BY\s*/i, '').trim();
+    orderClause = `ORDER BY is_priority DESC NULLS LAST, ${baseOrder}`;
 
     // Quality/tier filter — use stored effective tier column
     if (quality) {
@@ -962,6 +955,8 @@ export async function enrichLeadsBatch(req, res) {
 
 // POST /api/leads/hunter-email-batch
 // Hunter.io only: find/verify emails for selected leads (no profile enrichment).
+// If no leadIds or empty array: start background batch of up to 50 leads that don't have email.
+// If leadIds provided: enrich only those leads that don't already have email (skip already-extracted).
 export async function hunterEmailBatch(req, res) {
   try {
     const { leadIds } = req.body || {};
@@ -980,19 +975,43 @@ export async function hunterEmailBatch(req, res) {
       return res.status(400).json({ error: "leadIds must be an array of lead IDs" });
     }
 
+    // Only enrich leads that don't already have email (do not re-extract)
+    const check = await pool.query(
+      `SELECT id, email FROM leads WHERE id = ANY($1::int[])`,
+      [leadIds]
+    );
+    const toEnrich = check.rows
+      .filter((r) => r.email == null || String(r.email).trim() === "")
+      .map((r) => r.id);
+    const skipped = leadIds.length - toEnrich.length;
+
+    if (toEnrich.length === 0) {
+      return res.json({
+        success: true,
+        status: "completed",
+        count: leadIds.length,
+        successCount: 0,
+        results: [],
+        message: skipped > 0 ? `All ${leadIds.length} selected lead(s) already have email. Nothing to enrich.` : "No leads to enrich.",
+      });
+    }
+
     const { default: enrichmentService } = await import("../services/enrichment.service.js");
-    const results = await enrichmentService.enrichLeadsHunterOnly(leadIds);
+    const results = await enrichmentService.enrichLeadsHunterOnly(toEnrich);
 
     const successCount = results.filter((r) => r.success).length;
     return res.json({
       success: true,
-      status: successCount === leadIds.length ? "completed" : "completed_with_errors",
-      count: leadIds.length,
+      status: successCount === toEnrich.length ? "completed" : "completed_with_errors",
+      count: toEnrich.length,
       successCount,
       results,
-      message: successCount === leadIds.length
-        ? `Email lookup completed for ${successCount} leads.`
-        : `Email lookup completed for ${successCount} of ${leadIds.length} leads.`,
+      message:
+        skipped > 0
+          ? `Email lookup completed for ${successCount} of ${toEnrich.length} leads (${skipped} already had email).`
+          : successCount === toEnrich.length
+            ? `Email lookup completed for ${successCount} leads.`
+            : `Email lookup completed for ${successCount} of ${toEnrich.length} leads.`,
     });
   } catch (err) {
     console.error("Hunter email batch error:", err);
@@ -1500,6 +1519,7 @@ export async function importLeadsFromCSV(req, res) {
     let duplicates = 0;
     let errors = 0;
     const errorDetails = [];
+    const savedLeadIds = [];
 
     for (const record of records) {
       try {
@@ -1546,8 +1566,12 @@ export async function importLeadsFromCSV(req, res) {
         };
 
         const inserted = await saveLead(lead);
-        if (inserted) saved++;
-        else duplicates++;
+        if (inserted) {
+          saved++;
+          if (inserted.id) savedLeadIds.push(inserted.id);
+        } else {
+          duplicates++;
+        }
       } catch (err) {
         errors++;
         errorDetails.push({ row: record, reason: err.message });
@@ -1570,11 +1594,14 @@ export async function importLeadsFromCSV(req, res) {
     }
 
     if (saved > 0) {
+      const csvDeepLink = savedLeadIds.length > 0
+        ? `/imported-leads?ids=${savedLeadIds.join(',')}&highlight=${savedLeadIds.join(',')}`
+        : '/imported-leads';
       await NotificationService.create({
         type: 'lead_imported',
         title: 'CSV import completed',
         message: `Imported ${saved} leads from CSV${duplicates > 0 ? ` (${duplicates} duplicates skipped)` : ''}`,
-        data: { saved, duplicates, errors, link: `/leads?highlight=recent_import` },
+        data: { saved, duplicates, errors, link: csvDeepLink, leadIds: savedLeadIds },
       });
     }
 
@@ -1903,11 +1930,14 @@ export async function bulkApproveLeads(req, res) {
 
     console.log(`✅ Approved ${result.rowCount} leads`);
 
+    const approveDeepLink = leadIds.length > 0
+      ? `/connections?ids=${leadIds.join(',')}&highlight=${leadIds.join(',')}`
+      : '/connections';
     await NotificationService.create({
       type: 'approval_approved',
       title: 'Leads approved',
       message: `${result.rowCount} leads approved for campaigns`,
-      data: { leadIds, count: result.rowCount, link: `/leads?highlight=${leadIds.join(',')}` },
+      data: { leadIds, count: result.rowCount, link: approveDeepLink },
     });
 
 
@@ -1972,11 +2002,14 @@ export async function bulkRejectLeads(req, res) {
 
     console.log(`❌ Rejected ${result.rowCount} leads (reason: ${reason || 'not specified'})`);
 
+    const rejectDeepLink = leadIds.length > 0
+      ? `/connections?ids=${leadIds.join(',')}&highlight=${leadIds.join(',')}`
+      : '/connections';
     await NotificationService.create({
       type: 'approval_rejected',
       title: 'Leads rejected',
       message: `${result.rowCount} leads rejected${reason ? ` (${reason})` : ''}`,
-      data: { leadIds, count: result.rowCount, reason, link: `/leads?highlight=${leadIds.join(',')}` },
+      data: { leadIds, count: result.rowCount, reason, link: rejectDeepLink },
     });
 
     res.json({
@@ -2487,10 +2520,10 @@ export async function exportLeads(req, res) {
         params.push(review_status);
       }
       if (hasEmail === "true") {
-        conditionClauses.push(`email IS NOT NULL AND email != ''`);
+        conditionClauses.push(`(email IS NOT NULL AND TRIM(COALESCE(email, '')) != '')`);
       }
       if (hasLinkedin === "true") {
-        conditionClauses.push(`linkedin_url IS NOT NULL AND linkedin_url != ''`);
+        conditionClauses.push(`(linkedin_url IS NOT NULL AND TRIM(COALESCE(linkedin_url, '')) != '')`);
       }
       if (title && title.trim()) {
         conditionClauses.push(`title ILIKE $${params.length + 1}`);

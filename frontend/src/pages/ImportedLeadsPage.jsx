@@ -12,6 +12,7 @@ export default function ImportedLeadsPage() {
       showBackToReview={false}
       showImportedStats={true}
       listTitle="Imported Leads"
+      applyDefaultDateRange={false}
     />
   );
 }

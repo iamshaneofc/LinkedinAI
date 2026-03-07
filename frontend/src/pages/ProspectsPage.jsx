@@ -12,6 +12,7 @@ export default function ProspectsPage() {
       showReviewTabs={false}
       showBackToReview={false}
       listTitle="Prospects"
+      applyDefaultDateRange={false}
     />
   );
 }

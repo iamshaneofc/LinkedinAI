@@ -188,13 +188,17 @@ export async function exportConnectionsComplete(req, res) {
     // Step 3: Save to database with source = connections_export (classified for CRM)
     const leadSource = "connections_export";
     let savedCount = 0;
+    const savedLeadIds = [];
     for (const lead of leads) {
       try {
         // Connection Export phantom exports 1st-degree connections only
         // If connectionDegree is missing, default to "1st"
         const connectionDegree = lead.connectionDegree || "1st";
         const saved = await saveLead({ ...lead, source: leadSource, connectionDegree });
-        if (saved) savedCount++;
+        if (saved) {
+          savedCount++;
+          if (saved.id) savedLeadIds.push(saved.id);
+        }
       } catch (err) {
         console.error("Error saving lead:", err.message);
       }
@@ -227,6 +231,9 @@ export async function exportConnectionsComplete(req, res) {
     console.log(`   Duplicates: ${leads.length - savedCount}`);
     console.log(`   CSV: ${filename}\n`);
 
+    const deepLink = savedLeadIds.length > 0
+      ? `/connections?ids=${savedLeadIds.join(',')}&highlight=${savedLeadIds.join(',')}`
+      : '/connections';
     try {
       await NotificationService.create({
         type: 'phantom_completed',
@@ -239,7 +246,8 @@ export async function exportConnectionsComplete(req, res) {
           saved: savedCount,
           duplicates: leads.length - savedCount,
           csvFile: filename,
-          link: '/leads?source=connections_export',
+          link: deepLink,
+          leadIds: savedLeadIds,
         },
       });
     } catch (notifyErr) {
@@ -301,6 +309,7 @@ export async function searchLeadsComplete(req, res) {
     let savedCount = 0;
     let duplicateCount = 0;
     let errorCount = 0;
+    const savedLeadIds = [];
 
     console.log(`\n💾 Saving ${leads.length} leads to database...`);
     for (const lead of leads) {
@@ -308,6 +317,7 @@ export async function searchLeadsComplete(req, res) {
         const saved = await saveLead({ ...lead, source: leadSource });
         if (saved) {
           savedCount++;
+          if (saved.id) savedLeadIds.push(saved.id);
         } else {
           duplicateCount++;
         }
@@ -361,6 +371,9 @@ export async function searchLeadsComplete(req, res) {
     if (pushedToCrm > 0) console.log(`   Pushed to CRM: ${pushedToCrm}`);
     console.log(`   CSV: ${filename}\n`);
 
+    const searchDeepLink = savedLeadIds.length > 0
+      ? `/connections?ids=${savedLeadIds.join(',')}&highlight=${savedLeadIds.join(',')}`
+      : '/connections';
     try {
       await NotificationService.create({
         type: 'phantom_completed',
@@ -375,7 +388,8 @@ export async function searchLeadsComplete(req, res) {
           duplicates: leads.length - savedCount,
           pushedToCrm,
           csvFile: filename,
-          link: '/leads?source=search_export',
+          link: searchDeepLink,
+          leadIds: savedLeadIds,
         },
       });
     } catch (notifyErr) {
@@ -436,10 +450,14 @@ export async function importByContainerId(req, res) {
     const leads = parsePhantomResults(data);
     const leadSource = "search_export";
     let savedCount = 0;
+    const savedLeadIds = [];
     for (const lead of leads) {
       try {
         const saved = await saveLead({ ...lead, source: leadSource });
-        if (saved) savedCount++;
+        if (saved) {
+          savedCount++;
+          if (saved.id) savedLeadIds.push(saved.id);
+        }
       } catch (err) {
         console.error("Error saving lead:", err.message);
       }
@@ -456,6 +474,9 @@ export async function importByContainerId(req, res) {
       console.error("Failed to log import:", err.message);
     }
 
+    const containerDeepLink = savedLeadIds.length > 0
+      ? `/connections?ids=${savedLeadIds.join(',')}&highlight=${savedLeadIds.join(',')}`
+      : '/connections';
     try {
       await NotificationService.create({
         type: 'phantom_completed',
@@ -468,7 +489,8 @@ export async function importByContainerId(req, res) {
           saved: savedCount,
           duplicates: leads.length - savedCount,
           csvFile: filename,
-          link: '/leads?source=search_export',
+          link: containerDeepLink,
+          leadIds: savedLeadIds,
         },
       });
     } catch (notifyErr) {

@@ -137,7 +137,7 @@ export async function saveLead(lead) {
       phantom_metadata = COALESCE(EXCLUDED.phantom_metadata, leads.phantom_metadata),
       approved_at = CASE WHEN EXCLUDED.review_status = 'approved' AND leads.approved_at IS NULL THEN NOW() ELSE leads.approved_at END,
       updated_at = NOW()
-    RETURNING (xmax = 0) AS inserted;
+    RETURNING id, (xmax = 0) AS inserted;
   `;
 
   const values = [
@@ -161,7 +161,9 @@ export async function saveLead(lead) {
   ];
 
   const result = await pool.query(query, values);
-  const wasInserted = result.rows[0]?.inserted;
+  const row = result.rows[0];
+  const wasInserted = row?.inserted;
+  const leadId = row?.id;
 
   // If lead matches niche and was updated (not inserted), promote to approved
   if (matchesNiche && !wasInserted) {
@@ -181,6 +183,6 @@ export async function saveLead(lead) {
     console.log(`🎯 Auto-qualified new lead matching your niche: ${lead.company || 'Unknown'} - ${lead.title || 'Unknown'}`);
   }
 
-  // Return the lead if it was inserted (not a duplicate)
-  return wasInserted ? result.rows[0] : null;
+  // Return { id, inserted: true } only when newly inserted (so callers' "if (saved)" and savedCount stay correct)
+  return wasInserted && leadId != null ? { id: leadId, inserted: true } : null;
 }

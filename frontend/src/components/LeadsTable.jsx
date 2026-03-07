@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useTimeFilter } from '../context/TimeFilterContext';
 import PageGuide from './PageGuide';
 import axios from 'axios';
@@ -77,13 +77,14 @@ export default function LeadsTable({
     baseQuery = {},
     showReviewTabs = true,
     showBackToReview = false,
-    applyDefaultDateRange = true,
+    applyDefaultDateRange = false,
     reviewTabs,
     initialReviewTab: initialReviewTabProp,
     listTitle,
     showImportedStats = false
 } = {}) {
     const navigate = useNavigate();
+    const location = useLocation();
     const { addToast } = useToast();
     const [leads, setLeads] = useState([]);
     const [campaigns, setCampaigns] = useState([]);
@@ -94,8 +95,9 @@ export default function LeadsTable({
     const [searchTerm, setSearchTerm] = useState('');
     const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0 });
 
-    // Highlight state for deep-link notifications (e.g. ?highlight=1,2,3)
+    // Highlight state for deep-link notifications (e.g. ?highlight=1,2,3 or location.state.notificationLeadIds)
     const [highlightedLeads, setHighlightedLeads] = useState(new Set());
+    const appliedNotificationDeepLinkRef = useRef(false);
 
     // Combined Meta Filters (includes all filters)
     const [searchParams, setSearchParams] = useSearchParams();
@@ -329,6 +331,11 @@ export default function LeadsTable({
     const [showEnrichConfirm, setShowEnrichConfirm] = useState(false);
     const [enrichConfirmIds, setEnrichConfirmIds] = useState([]);
 
+    // Manual email entry (for leads where Hunter already ran but found no email)
+    const [manualEmailLead, setManualEmailLead] = useState(null);
+    const [manualEmailValue, setManualEmailValue] = useState('');
+    const [savingManualEmail, setSavingManualEmail] = useState(false);
+
     // Column visibility & order (Green/Yellow; persisted to localStorage)
     const [columnOrder, setColumnOrder] = useState(() => loadColumnPreference().order);
     const [columnVisibility, setColumnVisibility] = useState(() => loadColumnPreference().visibility);
@@ -462,12 +469,12 @@ export default function LeadsTable({
             if (ids.length > 0) {
                 setHighlightedLeads(new Set(ids));
 
-                // Auto-clear highlights after 8 seconds
+                // Auto-clear highlights after 8 seconds and remove deep-link params (refresh or back will show full list)
                 const timer = setTimeout(() => {
                     setHighlightedLeads(new Set());
-                    // Remove highlight param from URL
                     const newParams = new URLSearchParams(searchParams);
                     newParams.delete('highlight');
+                    newParams.delete('ids');
                     setSearchParams(newParams, { replace: true });
                 }, 8000);
 
@@ -494,6 +501,25 @@ export default function LeadsTable({
             return () => clearTimeout(timer);
         }
     }, [searchParams, leads.length]);
+
+    // Notification deep link: when user clicked a notification, we receive lead IDs via location.state (lost on refresh)
+    useEffect(() => {
+        const ids = location.state?.notificationLeadIds;
+        if (!ids || !Array.isArray(ids) || ids.length === 0) {
+            appliedNotificationDeepLinkRef.current = false;
+            return;
+        }
+        const key = `${location.pathname}-${ids.join(',')}`;
+        if (appliedNotificationDeepLinkRef.current === key) return;
+        appliedNotificationDeepLinkRef.current = key;
+        setHighlightedLeads(new Set(ids));
+        // Defer so this runs after other initial effects (e.g. review tab) and our fetch wins
+        const t = setTimeout(() => fetchLeads(false, null, false, ids), 50);
+
+        // Clear highlight after 8 seconds (state remains until user navigates/refreshes)
+        const timer = setTimeout(() => setHighlightedLeads(new Set()), 8000);
+        return () => { clearTimeout(t); clearTimeout(timer); };
+    }, [location.pathname, location.state?.notificationLeadIds]);
 
     // PHASE 4: Fetch whenever review tab changes
     useEffect(() => {
@@ -550,7 +576,7 @@ export default function LeadsTable({
         }
     };
 
-    const fetchLeads = async (append = false, overrideFilters = null, silent = false) => {
+    const fetchLeads = async (append = false, overrideFilters = null, silent = false, overrideIds = null) => {
         let filtersToUse = overrideFilters ?? metaFilters;
 
         // When time filter applies (Dashboard + CRM), ensure every fetch uses the period range if no dates set
@@ -620,6 +646,18 @@ export default function LeadsTable({
                 params.set('source', baseQuery.source);
             }
 
+            // Deep link: fetch only these lead IDs (notification click state, or URL ids param)
+            const idList = overrideIds && overrideIds.length > 0
+                ? overrideIds
+                : (() => {
+                    const idsParam = searchParams.get('ids');
+                    if (!idsParam || typeof idsParam !== 'string') return [];
+                    return idsParam.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n > 0);
+                })();
+            if (idList.length > 0) {
+                params.set('ids', idList.join(','));
+            }
+
             if (searchTerm.trim()) {
                 params.set('search', searchTerm.trim());
             }
@@ -665,12 +703,13 @@ export default function LeadsTable({
             if (filtersToUse.hasContactInfo) {
                 params.set('has_contact_info', 'true');
             }
-            // When showing Imported tab, do NOT filter by date so all CSV/Excel imports are visible
+            // When showing Imported tab or dedicated Imported Leads page, do NOT filter by date so all CSV/Excel imports are visible
             const isImportedTab = showReviewTabs && reviewStatusTab === 'imported' && enabledReviewTabs.includes('imported');
-            if (!isImportedTab && filtersToUse.createdFrom) {
+            const isImportedLeadsPage = baseQuery?.source === 'csv_import,excel_import';
+            if (!isImportedTab && !isImportedLeadsPage && filtersToUse.createdFrom) {
                 params.set('createdFrom', filtersToUse.createdFrom);
             }
-            if (!isImportedTab && filtersToUse.createdTo) {
+            if (!isImportedTab && !isImportedLeadsPage && filtersToUse.createdTo) {
                 params.set('createdTo', filtersToUse.createdTo);
             }
 
@@ -848,8 +887,12 @@ export default function LeadsTable({
             if (currentMetaFilters.location) params.location = currentMetaFilters.location;
             if (currentMetaFilters.timezone) params.timezone = currentMetaFilters.timezone;
             if (currentMetaFilters.status !== 'all') params.status = currentMetaFilters.status;
-            if (currentMetaFilters.createdFrom) params.createdFrom = currentMetaFilters.createdFrom;
-            if (currentMetaFilters.createdTo) params.createdTo = currentMetaFilters.createdTo;
+            // On Imported Leads page, do not filter stats by date so counts reflect all imported leads
+            const isImportedLeadsPageStats = baseQuery?.source === 'csv_import,excel_import';
+            if (!isImportedLeadsPageStats) {
+                if (currentMetaFilters.createdFrom) params.createdFrom = currentMetaFilters.createdFrom;
+                if (currentMetaFilters.createdTo) params.createdTo = currentMetaFilters.createdTo;
+            }
 
 
             // Construct 'filters' JSON for advanced/quick filters (same logic as fetchLeads)
@@ -1082,6 +1125,11 @@ export default function LeadsTable({
             metaFilters.hasContactInfo ||
             (metaFilters.createdFrom || metaFilters.createdTo);
     };
+
+    // Section-level "has applied filter" for highlighting in filter panel
+    const leadInfoActive = Boolean(metaFilters.title?.trim() || metaFilters.location?.trim() || metaFilters.industry?.trim() || metaFilters.company?.trim() || metaFilters.connectionDegree?.trim() || metaFilters.timezone?.trim() || metaFilters.quality?.trim());
+    const statusSourceActive = metaFilters.status !== 'all' || metaFilters.source !== 'all';
+    const advancedOptionsActive = Boolean(metaFilters.createdFrom || metaFilters.createdTo || metaFilters.hasEmail || metaFilters.hasLinkedin || metaFilters.hasContactInfo);
 
     const handleLoadMore = () => {
         fetchLeads(true);
@@ -1473,12 +1521,18 @@ export default function LeadsTable({
     const ENRICH_DISCLAIMER = 'Our email finder tool will enrich your contacts. This will use your email credits. We recommend filtering and enriching for a set of contacts.';
 
     const handleManualScrape = async (leadIdsOverride = null) => {
-        const leadIds = leadIdsOverride ?? Array.from(selectedLeads);
+        const leadIds = leadIdsOverride !== undefined && leadIdsOverride !== null
+            ? (Array.isArray(leadIdsOverride) ? leadIdsOverride : [])
+            : Array.from(selectedLeads);
         try {
             setEnriching(true);
-            addToast(`Finding emails for ${leadIds.length} contact(s)...`, 'info');
+            const count = leadIds.length;
+            addToast(
+                count > 0 ? `Finding emails for ${count} contact(s)...` : 'Finding emails for up to 50 contacts (without email)...',
+                'info'
+            );
 
-            const res = await axios.post('/api/leads/hunter-email-batch', { leadIds });
+            const res = await axios.post('/api/leads/hunter-email-batch', { leadIds: count > 0 ? leadIds : [] });
 
             if (res.data.status === 'enrichment_started') {
                 addToast(res.data.message || 'Email lookup started in background', 'success');
@@ -1498,6 +1552,30 @@ export default function LeadsTable({
             setEnriching(false);
             setShowEnrichConfirm(false);
             setEnrichConfirmIds([]);
+        }
+    };
+
+    const openManualEmail = (lead) => {
+        setManualEmailLead(lead);
+        setManualEmailValue(lead.email || '');
+    };
+
+    const saveManualEmail = async () => {
+        if (!manualEmailLead) return;
+        const email = (manualEmailValue || '').trim();
+        try {
+            setSavingManualEmail(true);
+            await axios.put(`/api/leads/${manualEmailLead.id}`, { email: email || null });
+            setLeads((prev) => prev.map((l) => (l.id === manualEmailLead.id ? { ...l, email: email || null } : l)));
+            addToast(email ? `Email saved for ${manualEmailLead.full_name || 'contact'}` : 'Email cleared', 'success');
+            setManualEmailLead(null);
+            setManualEmailValue('');
+            fetchStats();
+        } catch (error) {
+            const msg = error.response?.data?.error || error.message || 'Failed to save email';
+            addToast(`Error: ${msg}`, 'error');
+        } finally {
+            setSavingManualEmail(false);
         }
     };
 
@@ -1615,19 +1693,20 @@ export default function LeadsTable({
                                 </CardDescription>
                             </div>
                             <div className="flex gap-2">
-                                {(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') && (
+                                {(reviewStatusTab === 'approved' || reviewStatusTab === 'imported' || !showReviewTabs || baseQuery?.my_contacts) && (
                                     <div className="flex items-center gap-2">
                                         <Button
                                             variant="outline"
                                             size="icon"
                                             className="h-10 w-10 border-primary/50 text-primary hover:bg-primary/10 shadow-sm"
                                             onClick={() => {
-                                                const ids = selectedLeads.size > 0 ? Array.from(selectedLeads) : leads.map((l) => l.id);
+                                                const hasSelection = selectedLeads.size > 0;
+                                                const ids = hasSelection ? Array.from(selectedLeads) : [];
                                                 setEnrichConfirmIds(ids);
                                                 setShowEnrichConfirm(true);
                                             }}
                                             disabled={enriching || leads.length === 0}
-                                            title="Enrich emails (uses your email credits)"
+                                            title={selectedLeads.size > 0 ? `Enrich ${selectedLeads.size} selected contact(s)` : "Find emails for up to 50 contacts (without email)"}
                                         >
                                             <Contact className={cn("h-4 w-4", enriching && "animate-spin")} />
                                         </Button>
@@ -1810,14 +1889,17 @@ export default function LeadsTable({
                                     </div>
 
                                     {/* Quick Search Presets */}
-                                    <div className="border-b border-border/50 pb-4">
+                                    <div className={cn("border-b border-border/50 pb-4 rounded-lg transition-colors", activeQuickFilters.length > 0 && "bg-primary/5 -mx-1 px-3 py-2 border border-primary/20")}>
                                         <button
                                             type="button"
                                             onClick={() => setExpandedSections(prev => ({ ...prev, quickFilters: !prev.quickFilters }))}
                                             className="flex items-center gap-2 text-left w-full"
                                         >
-                                            <p className="text-xs font-semibold text-foreground">
+                                            <p className="text-xs font-semibold text-foreground flex items-center gap-2">
                                                 Quick Filters
+                                                {activeQuickFilters.length > 0 && (
+                                                    <span className="inline-flex items-center rounded-full bg-primary/20 text-primary px-2 py-0.5 text-[10px] font-semibold">Applied</span>
+                                                )}
                                             </p>
                                             {expandedSections.quickFilters ? (
                                                 <ChevronUp className="h-4 w-4 text-muted-foreground" />
@@ -1947,7 +2029,7 @@ export default function LeadsTable({
                                     {filterMode === 'simple' ? (
                                         <>
                                             {/* Lead Search Fields */}
-                                            <div className="border-b border-border/50 pb-4">
+                                            <div className={cn("border-b border-border/50 pb-4 rounded-lg transition-colors", leadInfoActive && "bg-primary/5 -mx-1 px-3 py-2 border border-primary/20")}>
                                                 <button
                                                     type="button"
                                                     onClick={() => setExpandedSections(prev => ({ ...prev, leadInformation: !prev.leadInformation }))}
@@ -1955,6 +2037,9 @@ export default function LeadsTable({
                                                 >
                                                     <p className="text-xs font-semibold text-foreground flex items-center gap-2">
                                                         Lead Information
+                                                        {leadInfoActive && (
+                                                            <span className="inline-flex items-center rounded-full bg-primary/20 text-primary px-2 py-0.5 text-[10px] font-semibold">Applied</span>
+                                                        )}
                                                     </p>
                                                     {expandedSections.leadInformation ? (
                                                         <ChevronUp className="h-4 w-4 text-muted-foreground" />
@@ -1972,7 +2057,7 @@ export default function LeadsTable({
                                                                 placeholder="e.g. CEO, CTO"
                                                                 value={metaFilters.title}
                                                                 onChange={(e) => setMetaFilters((f) => ({ ...f, title: e.target.value }))}
-                                                                className="h-9"
+                                                                className={cn("h-9", metaFilters.title?.trim() && "ring-2 ring-primary/30 border-primary/50 bg-primary/5")}
                                                             />
                                                         </div>
                                                         <div className="space-y-1.5">
@@ -1983,7 +2068,7 @@ export default function LeadsTable({
                                                                 placeholder="e.g. SaaS, Technology"
                                                                 value={metaFilters.industry}
                                                                 onChange={(e) => setMetaFilters((f) => ({ ...f, industry: e.target.value }))}
-                                                                className="h-9"
+                                                                className={cn("h-9", metaFilters.industry?.trim() && "ring-2 ring-primary/30 border-primary/50 bg-primary/5")}
                                                             />
                                                         </div>
                                                         <div className="space-y-1.5">
@@ -1994,7 +2079,7 @@ export default function LeadsTable({
                                                                 placeholder="e.g. San Francisco, Remote"
                                                                 value={metaFilters.location}
                                                                 onChange={(e) => setMetaFilters((f) => ({ ...f, location: e.target.value }))}
-                                                                className="h-9"
+                                                                className={cn("h-9", metaFilters.location?.trim() && "ring-2 ring-primary/30 border-primary/50 bg-primary/5")}
                                                             />
                                                         </div>
                                                         <div className="space-y-1.5">
@@ -2005,7 +2090,7 @@ export default function LeadsTable({
                                                                 placeholder="e.g. Google, Startup"
                                                                 value={metaFilters.company}
                                                                 onChange={(e) => setMetaFilters((f) => ({ ...f, company: e.target.value }))}
-                                                                className="h-9"
+                                                                className={cn("h-9", metaFilters.company?.trim() && "ring-2 ring-primary/30 border-primary/50 bg-primary/5")}
                                                             />
                                                         </div>
                                                         <div className="space-y-1.5">
@@ -2016,7 +2101,7 @@ export default function LeadsTable({
                                                                 placeholder="e.g. 1st, 2nd"
                                                                 value={metaFilters.connectionDegree}
                                                                 onChange={(e) => setMetaFilters((f) => ({ ...f, connectionDegree: e.target.value }))}
-                                                                className="h-9"
+                                                                className={cn("h-9", metaFilters.connectionDegree?.trim() && "ring-2 ring-primary/30 border-primary/50 bg-primary/5")}
                                                             />
                                                         </div>
                                                         <div className="space-y-1.5">
@@ -2026,7 +2111,7 @@ export default function LeadsTable({
                                                             <select
                                                                 value={metaFilters.timezone || ''}
                                                                 onChange={(e) => setMetaFilters((f) => ({ ...f, timezone: e.target.value }))}
-                                                                className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                                                className={cn("h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2", metaFilters.timezone?.trim() && "ring-2 ring-primary/30 border-primary/50 bg-primary/5")}
                                                             >
                                                                 <option value="">Any timezone</option>
                                                                 {TIMEZONE_OPTIONS.filter(Boolean).map((tz) => (
@@ -2039,7 +2124,7 @@ export default function LeadsTable({
                                             </div>
 
                                             {/* Status and Source */}
-                                            <div className="border-b border-border/50 pb-4">
+                                            <div className={cn("border-b border-border/50 pb-4 rounded-lg transition-colors", statusSourceActive && "bg-primary/5 -mx-1 px-3 py-2 border border-primary/20")}>
                                                 <button
                                                     type="button"
                                                     onClick={() => setExpandedSections(prev => ({ ...prev, statusSource: !prev.statusSource }))}
@@ -2047,6 +2132,9 @@ export default function LeadsTable({
                                                 >
                                                     <p className="text-xs font-semibold text-foreground flex items-center gap-2">
                                                         Status & Source
+                                                        {statusSourceActive && (
+                                                            <span className="inline-flex items-center rounded-full bg-primary/20 text-primary px-2 py-0.5 text-[10px] font-semibold">Applied</span>
+                                                        )}
                                                     </p>
                                                     {expandedSections.statusSource ? (
                                                         <ChevronUp className="h-4 w-4 text-muted-foreground" />
@@ -2059,7 +2147,7 @@ export default function LeadsTable({
                                                         <div className="space-y-1.5">
                                                             <label className="text-xs font-medium text-muted-foreground">Status</label>
                                                             <select
-                                                                className="w-full border border-input bg-background rounded-md px-3 py-2 text-sm h-9"
+                                                                className={cn("w-full border border-input bg-background rounded-md px-3 py-2 text-sm h-9", metaFilters.status !== 'all' && "ring-2 ring-primary/30 border-primary/50 bg-primary/5")}
                                                                 value={metaFilters.status}
                                                                 onChange={(e) => setMetaFilters((f) => ({ ...f, status: e.target.value }))}
                                                             >
@@ -2072,7 +2160,7 @@ export default function LeadsTable({
                                                         <div className="space-y-1.5">
                                                             <label className="text-xs font-medium text-muted-foreground">Source</label>
                                                             <select
-                                                                className="w-full border border-input bg-background rounded-md px-3 py-2 text-sm h-9"
+                                                                className={cn("w-full border border-input bg-background rounded-md px-3 py-2 text-sm h-9", metaFilters.source !== 'all' && "ring-2 ring-primary/30 border-primary/50 bg-primary/5")}
                                                                 value={metaFilters.source}
                                                                 onChange={(e) => setMetaFilters((f) => ({ ...f, source: e.target.value }))}
                                                             >
@@ -2086,7 +2174,7 @@ export default function LeadsTable({
                                             </div>
 
                                             {/* Advanced Options */}
-                                            <div>
+                                            <div className={cn("rounded-lg transition-colors", advancedOptionsActive && "bg-primary/5 -mx-1 px-3 py-2 border border-primary/20")}>
                                                 <button
                                                     type="button"
                                                     onClick={() => setExpandedSections(prev => ({ ...prev, advancedOptions: !prev.advancedOptions }))}
@@ -2094,6 +2182,9 @@ export default function LeadsTable({
                                                 >
                                                     <p className="text-xs font-semibold text-foreground flex items-center gap-2">
                                                         Advanced Options
+                                                        {advancedOptionsActive && (
+                                                            <span className="inline-flex items-center rounded-full bg-primary/20 text-primary px-2 py-0.5 text-[10px] font-semibold">Applied</span>
+                                                        )}
                                                     </p>
                                                     {expandedSections.advancedOptions ? (
                                                         <ChevronUp className="h-4 w-4 text-muted-foreground" />
@@ -2109,7 +2200,7 @@ export default function LeadsTable({
                                                                 type="date"
                                                                 value={metaFilters.createdFrom}
                                                                 onChange={(e) => setMetaFilters((f) => ({ ...f, createdFrom: e.target.value }))}
-                                                                className="h-9"
+                                                                className={cn("h-9", metaFilters.createdFrom && "ring-2 ring-primary/30 border-primary/50 bg-primary/5")}
                                                             />
                                                         </div>
                                                         <div className="space-y-1.5">
@@ -2118,11 +2209,11 @@ export default function LeadsTable({
                                                                 type="date"
                                                                 value={metaFilters.createdTo}
                                                                 onChange={(e) => setMetaFilters((f) => ({ ...f, createdTo: e.target.value }))}
-                                                                className="h-9"
+                                                                className={cn("h-9", metaFilters.createdTo && "ring-2 ring-primary/30 border-primary/50 bg-primary/5")}
                                                             />
                                                         </div>
                                                         <div className="flex flex-col justify-end gap-2">
-                                                            <label className="inline-flex items-center gap-2 text-xs cursor-pointer">
+                                                            <label className={cn("inline-flex items-center gap-2 text-xs cursor-pointer rounded px-2 py-1 -mx-2 -my-1", metaFilters.hasEmail && "bg-primary/10 text-primary font-medium")}>
                                                                 <input
                                                                     type="checkbox"
                                                                     className="accent-primary h-4 w-4"
@@ -2131,7 +2222,7 @@ export default function LeadsTable({
                                                                 />
                                                                 Has Email
                                                             </label>
-                                                            <label className="inline-flex items-center gap-2 text-xs cursor-pointer">
+                                                            <label className={cn("inline-flex items-center gap-2 text-xs cursor-pointer rounded px-2 py-1 -mx-2 -my-1", metaFilters.hasLinkedin && "bg-primary/10 text-primary font-medium")}>
                                                                 <input
                                                                     type="checkbox"
                                                                     className="accent-primary h-4 w-4"
@@ -2470,16 +2561,10 @@ export default function LeadsTable({
                                                                         Finding Email...
                                                                     </div>
                                                                 )}
-                                                                {lead.enrichment_status === 'failed' && (
+                                                                {lead.enrichment_status === 'failed' && !lead.email && (
                                                                     <div className="flex items-center gap-1.5 text-[10px] text-red-500 font-medium">
                                                                         <X className="h-2.5 w-2.5" />
                                                                         Email lookup failed
-                                                                    </div>
-                                                                )}
-                                                                {lead.enrichment_status === 'not_found' && (
-                                                                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-medium">
-                                                                        <Database className="h-2.5 w-2.5" />
-                                                                        Email Not Found
                                                                     </div>
                                                                 )}
                                                                 {lead.enrichment_status === 'completed' && lead.email && (
@@ -2498,28 +2583,38 @@ export default function LeadsTable({
                                                         ) : (
                                                             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                                                                 <Mail className="h-3.5 w-3.5 flex-shrink-0" />
-                                                                <span>—</span>
+                                                                {lead.hunter_attempted || ['completed', 'not_found', 'failed'].includes(lead.enrichment_status) ? (
+                                                                    <span className="text-[10px]">Not available</span>
+                                                                ) : (
+                                                                    <span>—</span>
+                                                                )}
                                                             </div>
                                                         )}
-                                                        {(!lead.email || lead.enrichment_status === 'not_found' || lead.enrichment_status === 'failed') && (
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="sm"
-                                                                className="h-7 text-xs text-primary hover:bg-primary/10 -ml-1"
-                                                                onClick={() => {
-                                                                    setEnrichConfirmIds([lead.id]);
-                                                                    setShowEnrichConfirm(true);
-                                                                }}
-                                                                disabled={enriching || lead.enrichment_status === 'processing'}
-                                                            >
-                                                                {lead.enrichment_status === 'processing' ? (
-                                                                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                                                                ) : (
-                                                                    <Contact className="h-3 w-3 mr-1" />
-                                                                )}
-                                                                Enrich
-                                                            </Button>
-                                                        )}
+                                                        {lead.email ? null : (() => {
+                                                            const hunterAlreadyRan = lead.hunter_attempted || ['completed', 'not_found', 'failed'].includes(lead.enrichment_status);
+                                                            if (!hunterAlreadyRan) {
+                                                                return (
+                                                                    <Button
+                                                                        variant="ghost"
+                                                                        size="sm"
+                                                                        className="h-7 text-xs text-primary hover:bg-primary/10 -ml-1"
+                                                                        onClick={() => {
+                                                                            setEnrichConfirmIds([lead.id]);
+                                                                            setShowEnrichConfirm(true);
+                                                                        }}
+                                                                        disabled={enriching || lead.enrichment_status === 'processing'}
+                                                                    >
+                                                                        {lead.enrichment_status === 'processing' ? (
+                                                                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                                                        ) : (
+                                                                            <Contact className="h-3 w-3 mr-1" />
+                                                                        )}
+                                                                        Enrich
+                                                                    </Button>
+                                                                );
+                                                            }
+                                                            return null;
+                                                        })()}
                                                         {lead.phone ? (
                                                             <div className="flex items-center gap-1.5 text-xs">
                                                                 <Phone className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
@@ -2569,6 +2664,12 @@ export default function LeadsTable({
                                                         <DropdownMenuItem onClick={() => navigate(`/leads/${lead.id}`)}>
                                                             <Eye className="mr-2 h-4 w-4" /> View Details
                                                         </DropdownMenuItem>
+
+                                                        {showContact && (
+                                                            <DropdownMenuItem onClick={() => openManualEmail(lead)}>
+                                                                <Mail className="mr-2 h-4 w-4" /> Edit email
+                                                            </DropdownMenuItem>
+                                                        )}
 
                                                         {lead.review_status === 'approved' && (
                                                             <DropdownMenuItem onClick={() => {
@@ -2692,15 +2793,48 @@ export default function LeadsTable({
                         </DialogDescription>
                     </DialogHeader>
                     <p className="text-sm font-medium py-2">
-                        Enrich {enrichConfirmIds.length} contact{enrichConfirmIds.length !== 1 ? 's' : ''}?
+                        {enrichConfirmIds.length > 0
+                            ? `Enrich ${enrichConfirmIds.length} selected contact${enrichConfirmIds.length !== 1 ? 's' : ''}? (Leads that already have email will be skipped.)`
+                            : 'Find emails for up to 50 contacts that don\'t have one yet?'}
                     </p>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => { setShowEnrichConfirm(false); setEnrichConfirmIds([]); }}>
                             Cancel
                         </Button>
-                        <Button onClick={() => handleManualScrape(enrichConfirmIds)} disabled={enriching}>
+                        <Button onClick={() => handleManualScrape(enrichConfirmIds.length > 0 ? enrichConfirmIds : undefined)} disabled={enriching}>
                             {enriching ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                             Confirm
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Manual email entry (for leads where Hunter ran but no email found) */}
+            <Dialog open={!!manualEmailLead} onOpenChange={(open) => { if (!open) { setManualEmailLead(null); setManualEmailValue(''); } }}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Enter email manually</DialogTitle>
+                        <DialogDescription>
+                            {manualEmailLead ? `Save email for ${manualEmailLead.full_name || 'this contact'}. It will be stored in the lead record.` : ''}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-3">
+                        <Input
+                            type="email"
+                            placeholder="email@example.com"
+                            value={manualEmailValue}
+                            onChange={(e) => setManualEmailValue(e.target.value)}
+                            className="w-full"
+                            autoFocus
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => { setManualEmailLead(null); setManualEmailValue(''); }}>
+                            Cancel
+                        </Button>
+                        <Button onClick={saveManualEmail} disabled={savingManualEmail}>
+                            {savingManualEmail ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                            Save
                         </Button>
                     </DialogFooter>
                 </DialogContent>

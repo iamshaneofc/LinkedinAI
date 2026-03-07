@@ -11,6 +11,7 @@ export default function MyContactsPage() {
       showReviewTabs={false}
       showBackToReview={true}
       listTitle="My Contacts"
+      applyDefaultDateRange={false}
     />
   );
 }

@@ -10,6 +10,55 @@ import {
 } from './ui/dropdown-menu';
 import { cn } from '../lib/utils';
 
+/**
+ * Resolve destination path and lead IDs for a notification click.
+ * Handles old notifications that had /leads (redirects to my-contacts) so we send to the correct page.
+ * Returns { path, leadIds } so we can navigate(path, { state: { notificationLeadIds: leadIds } }).
+ */
+function getNotificationDestination(n) {
+    const data = n?.data || {};
+    let path = typeof data.link === 'string' ? new URL(data.link, 'http://dummy').pathname : '';
+    let leadIds = Array.isArray(data.leadIds) ? data.leadIds : [];
+
+    // Parse ids from link query string if we have link but no leadIds (e.g. old format)
+    if (leadIds.length === 0 && typeof data.link === 'string' && data.link.includes('ids=')) {
+        try {
+            const q = data.link.split('?')[1];
+            if (q) {
+                const idsMatch = q.match(/ids=([^&]+)/);
+                if (idsMatch) leadIds = idsMatch[1].split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n > 0);
+            }
+        } catch (_) {}
+    }
+
+    // Fix old notifications: /leads redirects to my-contacts; send to the correct CRM page by type/title/message
+    const title = (n?.title || '').toLowerCase();
+    const message = (n?.message || '').toLowerCase();
+    const type = n?.type || '';
+
+    if (!path || path === '/leads' || path === '/my-contacts') {
+        if (type === 'lead_imported' || title.includes('csv import') || title.includes('import completed') && message.includes('csv')) {
+            path = '/imported-leads';
+        } else if (type === 'phantom_completed' || type === 'lead_enriched') {
+            if (message.includes('connection') && (message.includes('export') || message.includes('extracted'))) {
+                path = '/connections';
+            } else if (message.includes('search') || message.includes('linkedin search') || message.includes('container')) {
+                path = '/connections';
+            } else if (message.includes('enriched')) {
+                path = '/connections';
+            } else {
+                path = '/connections';
+            }
+        } else if (type === 'approval_approved' || type === 'approval_rejected') {
+            path = '/connections';
+        } else {
+            path = path || '/connections';
+        }
+    }
+
+    return { path, leadIds };
+}
+
 const POLL_INTERVAL_MS = 30000; // 30 seconds
 const MAX_NOTIFICATIONS = 20;
 
@@ -97,17 +146,17 @@ export default function NotificationDropdown() {
         if (open) fetchNotifications();
     }, [open, fetchNotifications]);
 
-    const markAsRead = async (id, link) => {
+    const handleNotificationClick = async (n) => {
         try {
-            await axios.patch(`/api/notifications/${id}/read`);
+            await axios.patch(`/api/notifications/${n.id}/read`);
             setNotifications((prev) =>
-                prev.map((n) => (n.id === id ? { ...n, read_at: new Date().toISOString() } : n))
+                prev.map((item) => (item.id === n.id ? { ...item, read_at: new Date().toISOString() } : item))
             );
             setUnreadCount((c) => Math.max(0, c - 1));
-            if (link) {
-                setOpen(false);
-                navigate(link);
-            }
+            setOpen(false);
+
+            const { path, leadIds } = getNotificationDestination(n);
+            navigate(path, { state: { notificationLeadIds: leadIds } });
         } catch (err) {
             // ignore
         }
@@ -163,12 +212,11 @@ export default function NotificationDropdown() {
                         <div className="py-1">
                             {notifications.map((n) => {
                                 const isUnread = !n.read_at;
-                                const link = n.data?.link;
                                 const icon = typeIcons[n.type] ?? '•';
                                 return (
                                     <button
                                         key={n.id}
-                                        onClick={() => markAsRead(n.id, link)}
+                                        onClick={() => handleNotificationClick(n)}
                                         className={cn(
                                             'w-full flex items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-accent',
                                             isUnread && 'bg-accent/50'
