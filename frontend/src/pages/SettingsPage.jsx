@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import {
   Settings,
@@ -113,11 +113,29 @@ const SettingsPage = () => {
     linkedin_profile_url: "",
     preference_tiers: defaultTiers,
     preference_active: false,
+    profile_meta: {},
   });
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [analyzingProfile, setAnalyzingProfile] = useState(false);
   const [industryList, setIndustryList] = useState([]);
 
+  // Shared industry options and grouped list (major → sub); used in Your profile and in Primary/Secondary/Tertiary
+  const INDUSTRY_OPTIONS_FALLBACK = [
+    "Technology, Information and Media", "Financial Services", "Professional Services", "Manufacturing", "Retail", "Education",
+    "Hospitals and Health Care", "Marketing & Advertising", "Construction", "Real Estate and Equipment Rental Services", "Other"
+  ];
+  const groupedIndustries = useMemo(() => {
+    if (!industryList.length) return [];
+    const byTop = new Map();
+    for (const ind of industryList) {
+      const top = ind.top_level_industry || ind.name || "Other";
+      if (!byTop.has(top)) byTop.set(top, []);
+      byTop.get(top).push({ ...ind, label: ind.name || ind.label || "" });
+    }
+    return Array.from(byTop.entries())
+      .map(([topLevel, industries]) => ({ topLevel, industries }))
+      .sort((a, b) => (a.topLevel || "").localeCompare(b.topLevel || ""));
+  }, [industryList]);
 
 
   // 🆕 Phantom sync status state
@@ -285,6 +303,7 @@ const SettingsPage = () => {
             },
             contacts_min_score: res.data.contacts_min_score ?? 70,
             preference_active: res.data.preference_active || false,
+            profile_meta: res.data.profile_meta && typeof res.data.profile_meta === "object" ? res.data.profile_meta : {},
           }));
         }
       } catch (error) {
@@ -395,8 +414,9 @@ const SettingsPage = () => {
     try {
       await axios.put("/api/preferences", {
         linkedin_profile_url: preferences.linkedin_profile_url,
-        preference_tiers: preferences.preference_tiers,
         preference_active: preferences.preference_active,
+        preference_tiers: preferences.preference_tiers,
+        profile_meta: preferences.profile_meta || {},
       });
       addToast("Preferences saved. Redirecting to dashboard — refresh in a few seconds to see updated tier counts.", "success");
       window.location.href = "/";
@@ -406,22 +426,39 @@ const SettingsPage = () => {
     }
   };
 
+  const togglePreferenceActive = async () => {
+    try {
+      const newState = !preferences.preference_active;
+      const res = await axios.post("/api/preferences/activate", { active: newState });
+      setPreferences((prev) => ({ ...prev, preference_active: newState }));
+      addToast(res.data?.message || (newState ? "Preferences active — manual tiers apply." : "Preferences paused — profile-based tiering applies."), "success");
+    } catch (error) {
+      addToast("Failed to toggle preferences", "error");
+    }
+  };
+
   const analyzeProfile = async () => {
-    if (!preferences.linkedin_profile_url?.trim()) {
-      addToast("Enter your LinkedIn Profile URL first", "warning");
+    const name = preferences.profile_meta?.name ?? "";
+    const title = preferences.profile_meta?.title ?? "";
+    const industry = preferences.profile_meta?.industry ?? "";
+    if (!name?.trim() || !title?.trim() || !industry?.trim()) {
+      addToast("Please set your profile title, industry — everything is mandatory here.", "warning");
       return;
     }
     setAnalyzingProfile(true);
     try {
       const res = await axios.post("/api/preferences/analyze", {
-        linkedin_profile_url: preferences.linkedin_profile_url.trim(),
+        name: name.trim() || undefined,
+        title: title.trim() || undefined,
+        industry: industry.trim() || undefined,
       });
       if (res.data?.suggested) {
         setPreferences((prev) => ({
           ...prev,
           preference_tiers: res.data.suggested,
+          profile_meta: { ...(prev.profile_meta || {}), ...(res.data.profile_meta && typeof res.data.profile_meta === "object" ? res.data.profile_meta : {}) },
         }));
-        addToast("Profile analyzed. All three tiers filled with 3–5 options each. Edit if needed, then Save Preferences.", "success");
+        addToast("Profile analyzed. Primary, Secondary, and Tertiary filled. Edit if needed, then Save Preferences.", "success");
       }
     } catch (error) {
       addToast(error.response?.data?.error || "Analyze failed", "error");
@@ -429,18 +466,6 @@ const SettingsPage = () => {
       setAnalyzingProfile(false);
     }
   };
-
-  const togglePreferenceActive = async () => {
-    try {
-      const newState = !preferences.preference_active;
-      const res = await axios.post("/api/preferences/activate", { active: newState });
-      setPreferences({ ...preferences, preference_active: newState });
-      addToast(res.data.message, "success");
-    } catch (error) {
-      addToast("Failed to toggle preferences", "error");
-    }
-  };
-
 
 
   const toggleAutoRunEnabled = () => {
@@ -1146,7 +1171,7 @@ const SettingsPage = () => {
                 <Input
                   id="profile-url"
                   type="url"
-                  placeholder="https://... or set via Save Preferences (LinkedIn profile URL)"
+                  placeholder="https://... (optional image URL for app bar)"
                   value={branding.profileImageUrl}
                   onChange={(e) =>
                     setBranding({
@@ -1155,7 +1180,7 @@ const SettingsPage = () => {
                     })
                   }
                 />
-                <p className="text-[10px] text-muted-foreground">Filled automatically when you Save preferences with a LinkedIn profile URL below.</p>
+                <p className="text-[10px] text-muted-foreground">Optional. Enter a direct image URL for the app bar, or leave blank.</p>
               </div>
             </div>
             <div className="space-y-2">
@@ -1246,7 +1271,7 @@ const SettingsPage = () => {
                   LinkedIn Preferences
                 </CardTitle>
                 <CardDescription className="mt-1.5">
-                  Default lead tiers (primary/secondary/tertiary) are set automatically. Save here to use a specific profile: enter your LinkedIn profile URL (required), click Analyze, then Save — AI will arrange leads by that profile. Titles, industries, and size are optional.
+                  Active = manual Primary/Secondary/Tertiary apply. Paused = all leads tiered by Your profile industry.
                 </CardDescription>
               </div>
               <div
@@ -1269,45 +1294,106 @@ const SettingsPage = () => {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="li-profile" className="flex items-center gap-2">
-                <Linkedin className="w-4 h-4" /> LinkedIn profile URL
-              </Label>
-              <div className="flex gap-2">
-                <Input
-                  id="li-profile"
-                  type="url"
-                  placeholder="https://www.linkedin.com/in/your-profile/"
-                  value={preferences.linkedin_profile_url}
-                  onChange={(e) => setPreferences({ ...preferences, linkedin_profile_url: e.target.value })}
-                  className="flex-1"
-                />
-                <Button type="button" variant="outline" onClick={analyzeProfile} disabled={analyzingProfile}>
-                  {analyzingProfile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                  Analyze
-                </Button>
+            {/* Your profile (for prioritization) — Name, Title, Industry only; Analyze fills Primary/Secondary/Tertiary below */}
+            <div className="rounded-lg border border-border/60 bg-muted/30 p-4 space-y-3 min-w-0 overflow-hidden">
+              <p className="text-xs font-semibold text-foreground">Your profile (for prioritization)</p>
+              <p className="text-[10px] text-muted-foreground break-words">Fill these so the CRM prioritizes leads based on your profile. Click Analyze to fill Primary, Secondary, and Tertiary below using AI.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 min-w-0">
+                <div className="space-y-1 min-w-0">
+                  <Label htmlFor="profile-name" className="text-[11px] text-muted-foreground">Name</Label>
+                  <Input
+                    id="profile-name"
+                    placeholder="e.g. John Doe"
+                    value={preferences.profile_meta?.name ?? ''}
+                    onChange={(e) => setPreferences((prev) => ({
+                      ...prev,
+                      profile_meta: { ...(prev.profile_meta || {}), name: e.target.value },
+                    }))}
+                    className="h-9 text-xs sm:text-sm min-w-0"
+                  />
+                </div>
+                <div className="space-y-1 min-w-0">
+                  <Label htmlFor="profile-title" className="text-[11px] text-muted-foreground">Title</Label>
+                  <select
+                    id="profile-title"
+                    value={preferences.profile_meta?.title ?? ''}
+                    onChange={(e) => setPreferences((prev) => ({
+                      ...prev,
+                      profile_meta: { ...(prev.profile_meta || {}), title: e.target.value },
+                    }))}
+                    className="h-9 w-full min-w-0 rounded-md border border-input bg-background px-2 py-1 text-xs sm:text-sm"
+                  >
+                    <option value="">Select title…</option>
+                    {["CEO", "CTO", "CFO", "Director", "Manager", "VP", "Founder", "Head of", "Lead", "Engineer", "Analyst", "Consultant", "Specialist"].map((opt) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1 min-w-0">
+                  <Label htmlFor="profile-industry" className="text-[11px] text-muted-foreground">Industry</Label>
+                  {groupedIndustries.length > 0 ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button type="button" variant="outline" className="h-9 w-full min-w-0 justify-between text-xs sm:text-sm font-normal border-input bg-background px-2 py-1 overflow-hidden">
+                          <span className={`truncate min-w-0 text-left ${preferences.profile_meta?.industry ? "text-foreground" : "text-muted-foreground"}`} title={preferences.profile_meta?.industry || undefined}>
+                            {preferences.profile_meta?.industry || "Select industry…"}
+                          </span>
+                          <ChevronDown className="h-3.5 w-3.5 opacity-50 shrink-0 ml-1" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="max-h-[min(70vh,400px)] overflow-y-auto min-w-[220px]">
+                        {groupedIndustries.map((group) => (
+                          <DropdownMenuSub key={group.topLevel}>
+                            <DropdownMenuSubTrigger className="text-xs">{group.topLevel}</DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent className="max-h-[min(60vh,320px)] overflow-y-auto">
+                              {group.industries.map((ind) => {
+                                const label = ind.label || ind.name || "";
+                                return (
+                                  <DropdownMenuItem
+                                    key={ind.code || label}
+                                    className="text-xs"
+                                    onSelect={() => setPreferences((prev) => ({
+                                      ...prev,
+                                      profile_meta: { ...(prev.profile_meta || {}), industry: label },
+                                    }))}
+                                  >
+                                    {label.length > 44 ? label.slice(0, 44) + "…" : label}
+                                  </DropdownMenuItem>
+                                );
+                              })}
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : (
+                    <select
+                      id="profile-industry"
+                      value={preferences.profile_meta?.industry ?? ''}
+                      onChange={(e) => setPreferences((prev) => ({
+                        ...prev,
+                        profile_meta: { ...(prev.profile_meta || {}), industry: e.target.value },
+                      }))}
+                      className="h-9 w-full min-w-0 rounded-md border border-input bg-background px-2 py-1 text-xs sm:text-sm"
+                    >
+                      <option value="">Select industry…</option>
+                      {INDUSTRY_OPTIONS_FALLBACK.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
               </div>
-              <p className="text-[10px] text-muted-foreground">Profile URL is required for Save. Analyze fills Primary, Secondary, and Tertiary with 3–5 options each (no duplicates). When you Save, the app will use this profile to set your display (initials from first + last name) and LinkedIn profile picture in the app bar.</p>
+              <Button type="button" variant="outline" onClick={analyzeProfile} disabled={analyzingProfile} className="gap-2 mt-2 text-xs sm:text-sm">
+                {analyzingProfile ? <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 animate-spin shrink-0" /> : <Sparkles className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />}
+                Analyze
+              </Button>
+              <p className="text-[10px] text-muted-foreground break-words">Uses OpenAI or Claude to fill Primary, Secondary, and Tertiary below based on your profile.</p>
             </div>
+
             {(() => {
               const TITLE_OPTIONS = ["CEO", "CTO", "CFO", "Director", "Manager", "VP", "Founder", "Head of", "Lead", "Engineer", "Analyst", "Consultant", "Specialist"];
-              const INDUSTRY_OPTIONS_FALLBACK = [
-                "Technology, Information and Media", "Financial Services", "Professional Services", "Manufacturing", "Retail", "Education",
-                "Hospitals and Health Care", "Marketing & Advertising", "Construction", "Real Estate and Equipment Rental Services", "Other"
-              ];
               const SIZE_OPTIONS = ["1-10", "11-50", "51-200", "201-500", "500+"];
-              const groupedIndustries = (() => {
-                if (!industryList.length) return [];
-                const byTop = new Map();
-                for (const ind of industryList) {
-                  const top = ind.top_level_industry || ind.name || "Other";
-                  if (!byTop.has(top)) byTop.set(top, []);
-                  byTop.get(top).push({ ...ind, label: ind.name || ind.label || "" });
-                }
-                return Array.from(byTop.entries())
-                  .map(([topLevel, industries]) => ({ topLevel, industries }))
-                  .sort((a, b) => (a.topLevel || "").localeCompare(b.topLevel || ""));
-              })();
               const addPick = (key, tier, value) => {
                 if (!value) return;
                 const t = preferences.preference_tiers?.[tier] || {};

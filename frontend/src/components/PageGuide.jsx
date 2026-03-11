@@ -1,7 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Info, HelpCircle } from 'lucide-react';
-import { Button } from './ui/button';
+import { Info, HelpCircle } from 'lucide-react';
 import { Card, CardContent } from './ui/card';
 
 const guides = {
@@ -54,7 +52,6 @@ const guides = {
 
 export default function PageGuide({ pageKey }) {
   const guide = guides[pageKey];
-  const navigate = useNavigate();
 
   if (!guide) return null;
 
@@ -76,37 +73,9 @@ export default function PageGuide({ pageKey }) {
                 {guide.description}
               </p>
             </div>
-
-            <div className="w-px h-12 bg-primary/10 hidden md:block" />
-
-            <div className="flex-1 space-y-4 text-center md:text-left">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-widest text-primary/60 mb-1">Next best action</p>
-                <h4 className="font-semibold text-foreground text-sm">{guide.nextPage.name}</h4>
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                  {guide.nextPage.info}
-                </p>
-              </div>
-
-              <Button
-                onClick={() => navigate(guide.nextPage.path)}
-                variant="default"
-                size="sm"
-                className="gap-2 group/btn"
-              >
-                Go to {guide.nextPage.name}
-                <ArrowRight className="h-4 w-4 transition-transform group-hover/btn:translate-x-1" />
-              </Button>
-            </div>
           </div>
         </CardContent>
       </Card>
-
-      <div className="mt-4 flex items-center justify-center gap-6 text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-medium opacity-50">
-        <span className="h-px w-12 bg-border" />
-        End of {pageKey} section
-        <span className="h-px w-12 bg-border" />
-      </div>
     </div>
   );
 }

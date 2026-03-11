@@ -188,6 +188,25 @@ export default function DashboardPage() {
   const [settings, setSettings] = useState(null);
   const [preferencesApplied, setPreferencesApplied] = useState(false);
 
+  // Dashboard scope: My Contacts (default) vs All Leads — controls which leads the dashboard stats/charts show
+  const DASHBOARD_SCOPE_KEY = "dashboard-scope-v1";
+  const [dashboardScope, setDashboardScope] = useState(() => {
+    try {
+      const s = sessionStorage.getItem(DASHBOARD_SCOPE_KEY);
+      if (s === "all" || s === "all_leads") return "all";
+      return "my_contacts";
+    } catch {
+      return "my_contacts";
+    }
+  });
+  const setDashboardScopeAndPersist = (scope) => {
+    const v = scope === "all" ? "all" : "my_contacts";
+    setDashboardScope(v);
+    try {
+      sessionStorage.setItem(DASHBOARD_SCOPE_KEY, v);
+    } catch (_) {}
+  };
+
 
 
   const analyticsAbortRef = useRef(null);
@@ -202,6 +221,7 @@ export default function DashboardPage() {
         month,
         year,
         preferences: preferencesApplied,
+        scope: dashboardScope,
       });
       if (selectedConnectionDegree)
         params.set("connection_degree", selectedConnectionDegree);
@@ -270,7 +290,7 @@ export default function DashboardPage() {
       if (fetchDebounceRef.current) clearTimeout(fetchDebounceRef.current);
       if (analyticsAbortRef.current) analyticsAbortRef.current.abort();
     };
-  }, [period, month, year, selectedConnectionDegree, preferencesApplied]);
+  }, [period, month, year, selectedConnectionDegree, preferencesApplied, dashboardScope]);
 
   useEffect(() => {
     axios
@@ -584,8 +604,9 @@ export default function DashboardPage() {
 
           {/* Right: Actions Group (Time + Import) */}
           <div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto justify-end">
-            {/* Time Range Group */}
-            <div className="flex rounded-lg border bg-muted/40 p-1">
+            {/* Time Range Group + Info */}
+            <div className="flex items-center gap-2">
+              <div className="flex rounded-lg border bg-muted/40 p-1">
               {PERIODS.map((p) => {
                 if (p.value === 'monthly') {
                   return (
@@ -641,8 +662,28 @@ export default function DashboardPage() {
                 );
               })}
             </div>
+            <InfoTooltip
+              content="Dashboard and CRM stats are filtered by this period. Daily = today, Weekly = current week, Monthly/Yearly = select a specific month or year."
+            />
+          </div>
 
-
+            {/* Dashboard scope: My Contacts (default) vs All Leads */}
+            <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-1.5">
+              <span className="text-xs font-medium text-muted-foreground">
+                Showing:
+              </span>
+              <span className="text-sm font-semibold text-foreground">
+                {dashboardScope === "all" ? "All Leads" : "My Contacts"}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs font-medium text-primary hover:text-primary hover:bg-primary/10"
+                onClick={() => setDashboardScopeAndPersist(dashboardScope === "all" ? "my_contacts" : "all")}
+              >
+                {dashboardScope === "all" ? "My Contacts" : "All Leads"}
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -693,6 +734,12 @@ export default function DashboardPage() {
             </CardTitle>
             <CardDescription>
               Extraction and lead quality metrics
+              {dashboardScope === "my_contacts" && (
+                <span className="ml-2 text-muted-foreground">(My Contacts only)</span>
+              )}
+              {dashboardScope === "all" && (
+                <span className="ml-2 text-muted-foreground">(All leads)</span>
+              )}
               {preferencesApplied && (
                 <span className="ml-2 inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary ring-1 ring-inset ring-primary/20">
                   Prioritized View
@@ -752,11 +799,13 @@ export default function DashboardPage() {
                         key={idx}
                         className="cursor-pointer flex flex-col p-4 rounded-md bg-background/50 border border-border/50 hover:border-primary/50 hover:bg-muted/40 transition-all group relative overflow-hidden space-y-2"
                         onClick={() => {
-                          navigate(
-                            selectedConnectionDegree
-                              ? `/my-contacts?quality=${item.id}&connection_degree=${selectedConnectionDegree}`
-                              : `/my-contacts?quality=${item.id}`,
-                          );
+                          const qualityParam = `quality=${item.id}`;
+                          const connParam = selectedConnectionDegree ? `&connection_degree=${selectedConnectionDegree}` : "";
+                          if (dashboardScope === "all") {
+                            navigate(`/leads?${qualityParam}${connParam}`);
+                          } else {
+                            navigate(selectedConnectionDegree ? `/my-contacts?${qualityParam}&connection_degree=${selectedConnectionDegree}` : `/my-contacts?${qualityParam}`);
+                          }
                         }}
                         role="button"
                         tabIndex={0}

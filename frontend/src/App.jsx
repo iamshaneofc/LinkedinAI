@@ -1,16 +1,9 @@
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import DashboardLayout from './components/layout/DashboardLayout';
-
-/** Redirect /leads to /my-contacts, preserving query string (e.g. ?quality=primary). */
-function RedirectLeadsToMyContacts() {
-    const { search } = useLocation();
-    return <Navigate to={`/my-contacts${search || ''}`} replace />;
-}
+import LeadsPage from './pages/LeadsPage';
 import DashboardPage from './pages/DashboardPage';
-import ConnectionsPage from './pages/ConnectionsPage';
 import ProspectsPage from './pages/ProspectsPage';
 import MyContactsPage from './pages/MyContactsPage';
-import ImportedLeadsPage from './pages/ImportedLeadsPage';
 import LeadDetailPage from './pages/LeadDetailPage';
 import LeadSearchPage from './pages/LeadSearchPage';
 import LeadImportPage from './pages/LeadImportPage';
@@ -29,11 +22,11 @@ function App() {
                 <Route index element={<DashboardPage />} />
                 <Route path="lead-import" element={<LeadImportPage />} />
                 <Route path="search" element={<LeadSearchPage />} />
-                <Route path="connections" element={<ConnectionsPage />} />
+                <Route path="connections" element={<Navigate to="/leads" replace />} />
                 <Route path="prospects" element={<ProspectsPage />} />
                 <Route path="my-contacts" element={<MyContactsPage />} />
-                <Route path="imported-leads" element={<ImportedLeadsPage />} />
-                <Route path="leads" element={<RedirectLeadsToMyContacts />} />
+                <Route path="imported-leads" element={<Navigate to="/leads" replace />} />
+                <Route path="leads" element={<LeadsPage />} />
                 <Route path="leads/:id" element={<LeadDetailPage />} />
                 <Route path="campaigns" element={<CampaignsPage />} />
                 <Route path="campaigns/email" element={<EmailCampaignsPage />} />

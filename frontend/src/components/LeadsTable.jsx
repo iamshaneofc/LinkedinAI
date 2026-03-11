@@ -6,8 +6,8 @@ import axios from 'axios';
 import { Search, MoreVertical, RefreshCw, Linkedin, Trash2, Edit2, Download, Filter, ChevronDown, ChevronUp, Loader2, Sparkles, MapPin, Building2, Briefcase, Target, Database, Eye, Check, X, Mail, Phone, UserPlus, Users, Network, Contact, Upload, AlertTriangle, Columns3, GripVertical, Clock, FileText, ShieldCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-/** Hunter.io / email finder icon (used for Enrich and email-in-contact context). */
-const HUNTER_EMAIL_ICON = '/hunter-email-icon.png';
+/** Search/Enrich icon (used for Enrich action in contacts). */
+const ENRICH_ICON = '/api/settings/logo/search';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
@@ -422,7 +422,7 @@ export default function LeadsTable({
                 skipNextQuickFiltersFetchRef.current = true; // prevent activeQuickFilters effect from overwriting with unfiltered fetch
                 setAdvancedFilters(parsed);
                 setFilterMode('advanced');
-                fetchLeads(false, null, false, null, parsed);
+                fetchLeads(false, null, false, null, parsed).then(() => fetchStats());
             }
         } catch (e) {
             console.warn('Invalid filters in URL', e);
@@ -447,7 +447,7 @@ export default function LeadsTable({
             skipNextQuickFiltersFetchRef.current = true;
             setAdvancedFilters(parsed);
             setFilterMode('advanced');
-            fetchLeads(false, null, false, null, parsed);
+            fetchLeads(false, null, false, null, parsed).then(() => fetchStats());
             sessionStorage.removeItem('campaignWizardAppliedFilters');
             setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('applyWizardFilters'); return n; }, { replace: true });
         } catch (e) {
@@ -1780,7 +1780,7 @@ export default function LeadsTable({
                                             disabled={enriching || leads.length === 0}
                                             title={selectedLeads.size > 0 ? `Enrich ${selectedLeads.size} selected contact(s)` : "Find emails for up to 50 contacts (without email)"}
                                         >
-                                            <img src={HUNTER_EMAIL_ICON} alt="Enrich" className={cn("h-4 w-4 object-contain", enriching && "animate-spin")} />
+                                            <img src={ENRICH_ICON} alt="Enrich" className={cn("h-4 w-4 object-contain", enriching && "animate-spin")} />
                                         </Button>
                                         <Button
                                             variant="outline"
@@ -2655,12 +2655,12 @@ export default function LeadsTable({
                                                         )}
                                                         {lead.email ? (
                                                             <div className="flex items-center gap-1.5 text-xs">
-                                                                <img src={HUNTER_EMAIL_ICON} alt="" className="h-3.5 w-3.5 object-contain flex-shrink-0" />
+                                                                <Mail className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                                                                 <span className="truncate font-medium" title={lead.email}>{lead.email}</span>
                                                             </div>
                                                         ) : (
                                                             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                                                <img src={HUNTER_EMAIL_ICON} alt="" className="h-3.5 w-3.5 object-contain flex-shrink-0" />
+                                                                <Mail className="h-3.5 w-3.5 flex-shrink-0" />
                                                                 {lead.hunter_attempted || ['completed', 'not_found', 'failed'].includes(lead.enrichment_status) ? (
                                                                     <span className="text-[10px]">Not available</span>
                                                                 ) : (
@@ -2685,7 +2685,7 @@ export default function LeadsTable({
                                                                         {lead.enrichment_status === 'processing' ? (
                                                                             <Loader2 className="h-3 w-3 animate-spin mr-1" />
                                                                         ) : (
-                                                                            <img src={HUNTER_EMAIL_ICON} alt="" className="h-3 w-3 object-contain mr-1" />
+                                                                            <img src={ENRICH_ICON} alt="" className="h-3 w-3 object-contain mr-1" />
                                                                         )}
                                                                         Enrich
                                                                     </Button>
@@ -2745,7 +2745,7 @@ export default function LeadsTable({
 
                                                         {showContact && (
                                                             <DropdownMenuItem onClick={() => openManualEmail(lead)}>
-                                                                <img src={HUNTER_EMAIL_ICON} alt="" className="mr-2 h-4 w-4 object-contain" /> Edit email
+                                                                <Mail className="mr-2 h-4 w-4" /> Edit email
                                                             </DropdownMenuItem>
                                                         )}
 

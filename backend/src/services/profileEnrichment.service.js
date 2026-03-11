@@ -30,6 +30,7 @@ class ProfileEnrichmentService {
                     fullName: leadData.full_name,
                     title: leadData.title,
                     company: leadData.company,
+                    location: leadData.location || '',
                     industry: this.extractIndustryFromCompany(leadData.company, leadData.title),
                     metadata: this.extractMetadata(leadData.company, leadData.title),
                     source: 'database'
@@ -53,13 +54,20 @@ class ProfileEnrichmentService {
     }
 
     /**
-     * Get lead data from database by LinkedIn URL
+     * Get lead data from database by LinkedIn URL (exact or normalized: with/without trailing slash).
      */
     async getLeadDataByUrl(linkedinUrl) {
+        if (!linkedinUrl || typeof linkedinUrl !== 'string') return null;
+        const trimmed = linkedinUrl.trim();
+        if (!trimmed) return null;
         try {
+            const normalized = trimmed.replace(/\/$/, '');
+            const withSlash = normalized + '/';
             const result = await pool.query(
-                'SELECT full_name, title, company FROM leads WHERE linkedin_url = $1 LIMIT 1',
-                [linkedinUrl]
+                `SELECT full_name, title, company, location FROM leads
+                 WHERE linkedin_url = $1 OR linkedin_url = $2
+                 LIMIT 1`,
+                [normalized, withSlash]
             );
             return result.rows[0] || null;
         } catch (error) {

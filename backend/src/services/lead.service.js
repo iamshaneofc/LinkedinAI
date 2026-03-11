@@ -1,12 +1,56 @@
 import pool from "../db.js";
 import profileEnrichmentService from "./profileEnrichment.service.js";
 import { scoreAndClassifyLead } from './preferenceScoring.service.js';
+import { resolveLeadTopLevel, resolveLeadSubIndustry } from './industryHierarchy.service.js';
 
 // Ensure we never exceed database column limits
 function safeTruncate(value, maxLength) {
   if (value === null || value === undefined) return null;
   const str = String(value);
   return str.length > maxLength ? str.slice(0, maxLength) : str;
+}
+
+/**
+ * Infer industry for a lead from company + title.
+ * Uses AI to pick one industry from our list (sub-category when possible); falls back to keyword matching.
+ * Called when a lead is saved and industry is missing.
+ */
+export async function inferLeadIndustry(company = '', title = '') {
+  const text = `${company || ''} ${title || ''}`.trim();
+  if (!text) return null;
+
+  try {
+    const AIService = (await import('./ai.service.js')).default;
+    const { getIndustryLabels } = await import('./industryList.service.js');
+    const labels = await getIndustryLabels();
+    if (labels.length === 0) throw new Error('No industry list');
+    if (!AIService.isConfigured()) throw new Error('AI not configured');
+
+    const listStr = labels.slice(0, 120).join(', ');
+    const prompt = `Given this company and job title, pick the single best-matching industry from the list below. Reply with ONLY that exact industry name, nothing else.
+
+Company: ${(company || '').slice(0, 200)}
+Title: ${(title || '').slice(0, 200)}
+
+Industry list: ${listStr}`;
+
+    const raw = await AIService.callAI(prompt, 100, 0.2);
+    if (!raw || typeof raw !== 'string') return null;
+    const chosen = raw.replace(/^["']|["']$/g, '').trim().split('\n')[0].trim();
+    const normalise = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    const nChosen = normalise(chosen);
+    const match = labels.find((l) => normalise(l) === nChosen || l === chosen);
+    if (match) return match;
+  } catch (_) {
+    // fallback to keyword
+  }
+
+  const topLevel = resolveLeadTopLevel(company, title);
+  if (topLevel) {
+    const sub = resolveLeadSubIndustry(company, title, topLevel);
+    return sub || topLevel;
+  }
+  return null;
 }
 
 /**
@@ -93,6 +137,12 @@ export async function matchesUserNiche(lead) {
 }
 
 export async function saveLead(lead) {
+  // Assign industry from company+title if missing (AI or keyword fallback)
+  if (!lead.industry || !String(lead.industry).trim()) {
+    const inferred = await inferLeadIndustry(lead.company || '', lead.title || '');
+    lead.industry = inferred || '';
+  }
+
   // Check if lead matches user's niche BEFORE determining review_status
   const matchesNiche = await matchesUserNiche(lead);
 
@@ -117,8 +167,8 @@ export async function saveLead(lead) {
 
   const query = `
     INSERT INTO leads
-    (linkedin_url, first_name, last_name, full_name, title, company, location, profile_image, email, phone, source, connection_degree, review_status, preference_score, preference_tier, is_priority, phantom_metadata)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+    (linkedin_url, first_name, last_name, full_name, title, company, location, profile_image, email, phone, source, connection_degree, review_status, preference_score, preference_tier, is_priority, phantom_metadata, industry)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
     ON CONFLICT (linkedin_url) DO UPDATE SET
       first_name = COALESCE(EXCLUDED.first_name, leads.first_name),
       last_name = COALESCE(EXCLUDED.last_name, leads.last_name),
@@ -135,6 +185,7 @@ export async function saveLead(lead) {
       preference_tier  = EXCLUDED.preference_tier,
       is_priority      = EXCLUDED.is_priority,
       phantom_metadata = COALESCE(EXCLUDED.phantom_metadata, leads.phantom_metadata),
+      industry = COALESCE(NULLIF(TRIM(EXCLUDED.industry), ''), leads.industry),
       approved_at = CASE WHEN EXCLUDED.review_status = 'approved' AND leads.approved_at IS NULL THEN NOW() ELSE leads.approved_at END,
       updated_at = NOW()
     RETURNING id, (xmax = 0) AS inserted;
@@ -158,6 +209,7 @@ export async function saveLead(lead) {
     tier || 'tertiary',
     !!initialIsPriority,
     phantomMetadataJson,
+    safeTruncate(lead.industry, 255),
   ];
 
   const result = await pool.query(query, values);

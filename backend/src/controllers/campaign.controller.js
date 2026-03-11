@@ -410,6 +410,13 @@ export async function addLeadsToCampaign(req, res) {
                 errors.push({ leadId, error: e.message });
             }
         }
+        // Mark leads as ever in campaign so they stay in Prospects even if removed later
+        if (leadIds.length > 0) {
+            await pool.query(
+                "UPDATE leads SET ever_in_campaign = TRUE WHERE id = ANY($1::int[])",
+                [leadIds]
+            );
+        }
 
         const campaignStatus = campaignCheck.rows[0]?.status;
         const response = {
@@ -1373,7 +1380,7 @@ export async function sendApprovedEmails(req, res) {
 }
 
 // POST /api/campaigns/estimate-audience
-// Estimate how many leads match the given filter criteria
+// Estimate how many leads match the given filter criteria (My Contacts only: 1st/2nd degree priority leads)
 export async function estimateAudience(req, res) {
     try {
         const { filters } = req.body;
@@ -1385,16 +1392,20 @@ export async function estimateAudience(req, res) {
         // Build SQL WHERE clause from filters
         const whereClause = buildWhereClauseFromFilters(filters);
 
-        // Count matching leads
-        const countQuery = `SELECT COUNT(*) as count FROM leads WHERE ${whereClause}`;
+        // Restrict to My Contacts only: is_priority + 1st/2nd degree (same as dashboard My Contacts scope)
+        const myContactsCondition = "(is_priority = TRUE AND (connection_degree ILIKE '%1st%' OR connection_degree ILIKE '%2nd%'))";
+        const fullWhere = `${myContactsCondition} AND (${whereClause})`;
+
+        // Count matching leads (My Contacts only)
+        const countQuery = `SELECT COUNT(*) as count FROM leads WHERE ${fullWhere}`;
         const countResult = await pool.query(countQuery);
         const count = parseInt(countResult.rows[0].count) || 0;
 
-        // Get preview (first 5 leads)
+        // Get preview (first 5 leads, My Contacts only)
         const previewQuery = `
             SELECT id, full_name, first_name, last_name, title, company, location
             FROM leads 
-            WHERE ${whereClause}
+            WHERE ${fullWhere}
             LIMIT 5
         `;
         const previewResult = await pool.query(previewQuery);

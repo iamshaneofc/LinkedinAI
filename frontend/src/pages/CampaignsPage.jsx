@@ -24,7 +24,6 @@ import {
 } from "../components/ui/dropdown-menu";
 import { useToast } from '../components/ui/toast';
 import { Skeleton } from '../components/ui/skeleton';
-import PageGuide from '../components/PageGuide';
 import CampaignWizard from '../components/CampaignWizard';
 import { cn } from '../lib/utils';
 
@@ -755,7 +754,6 @@ export default function CampaignsPage() {
                 </DialogContent>
             </Dialog>
 
-            <PageGuide pageKey="campaigns" />
         </div>
     );
 }

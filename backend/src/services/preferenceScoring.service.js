@@ -423,9 +423,9 @@ function defaultQualityScore(lead) {
 }
 
 /**
- * Recalculate scores for all leads (any source: My Contacts, search, import). No hardcoded logic restricts which leads go into which tier.
- * - Manual LinkedIn Preference tiers (Settings) have priority: if primary/secondary/tertiary have titles/industries/sizes, leads matching those lists get that tier; no match → tertiary.
- * - When no manual tiers: profile-based default using saved LinkedIn URL (or default profile). Primary = industries related to profile (e.g. chemical CEO → manufacturing, marketing, chemicals); Secondary = adjacent (IT, education); Tertiary = rest.
+ * Recalculate scores for all leads (any source: My Contacts, search, import).
+ * - When preference_active is ON (Active): use manual Primary/Secondary/Tertiary lists; leads matching those lists get that tier; no match → tertiary.
+ * - When preference_active is OFF (Paused): use profile-based tiering (Your profile industry); all leads get primary/secondary/tertiary from profile industry groups.
  * - manual_tier on a lead overrides computed preference_tier for display/filters.
  */
 export async function recalculateAllScores() {
@@ -437,11 +437,12 @@ export async function recalculateAllScores() {
     (tiers.secondary && (tiers.secondary.titles?.length || tiers.secondary.industries?.length || tiers.secondary.company_sizes?.length)) ||
     (tiers.tertiary && (tiers.tertiary.titles?.length || tiers.tertiary.industries?.length || tiers.tertiary.company_sizes?.length))
   );
-  const useProfileScoring = Boolean(hasTierCriteria);
+  const preferenceActive = Boolean(prefs?.preference_active);
+  const useManualTiers = preferenceActive && hasTierCriteria;
 
-  // When using saved tier criteria, map Settings industry labels to top-level so "Restaurants" etc. match lead resolved industry.
+  // When Active + manual tiers: map Settings industry labels to top-level for matching
   let industryLabelToTopLevel = null;
-  if (useProfileScoring) {
+  if (useManualTiers) {
     try {
       industryLabelToTopLevel = await getIndustryLabelToTopLevelMap();
     } catch (err) {
@@ -449,9 +450,9 @@ export async function recalculateAllScores() {
     }
   }
 
-  // When no manual tiers: try profile-based (default profile or saved URL) so relevant connections stay on top.
+  // When Paused (or Active but no manual tiers): use profile-based tiering so all leads get a tier from your profile industry
   let profileForTier = null;
-  if (!useProfileScoring) {
+  if (!useManualTiers) {
     try {
       profileForTier = await getProfileForTiering(prefs);
     } catch (err) {
@@ -474,7 +475,7 @@ export async function recalculateAllScores() {
     if (rows.length === 0) break;
     for (const lead of rows) {
       let score, tier;
-      if (useProfileScoring) {
+      if (useManualTiers) {
         const out = calculateScore(lead, prefs, industryLabelToTopLevel);
         score = out.score;
         tier = out.tier;
@@ -500,7 +501,7 @@ export async function recalculateAllScores() {
   if (allUpdates.length === 0) return { updated: 0 };
 
   let finalUpdates = allUpdates;
-  if (useProfileScoring) {
+  if (useManualTiers) {
     finalUpdates = allUpdates.map((u) => ({
       ...u,
       preference_tier: u.preference_tier || 'tertiary',
@@ -511,7 +512,6 @@ export async function recalculateAllScores() {
       preference_tier: u.preference_tier || 'tertiary',
     }));
   } else {
-    // No manual tiers and no profile: assign all to tertiary so every lead has a tier (no arbitrary % split).
     finalUpdates = allUpdates.map((u) => ({ ...u, preference_tier: 'tertiary' }));
   }
 
@@ -540,12 +540,12 @@ export async function recalculateAllScores() {
       );
     }
     await client.query('COMMIT');
-    const mode = useProfileScoring
-      ? 'manual preference tiers (Settings)'
+    const mode = useManualTiers
+      ? 'manual preference tiers (Active)'
       : profileForTier
-        ? 'profile-based (industry groups from LinkedIn URL)'
+        ? 'profile-based (Paused — industry from Your profile)'
         : 'tertiary (no profile)';
-    const tierSummary = useProfileScoring || profileForTier
+    const tierSummary = useManualTiers || profileForTier
       ? `${finalUpdates.filter(u => u.preference_tier === 'primary').length} primary / ${finalUpdates.filter(u => u.preference_tier === 'secondary').length} secondary / ${finalUpdates.filter(u => u.preference_tier === 'tertiary').length} tertiary`
       : 'dynamic % bands';
     console.log(`[scoring] Recalculated ${finalUpdates.length} leads: ${tierSummary}. Mode: ${mode}.`);
@@ -562,7 +562,7 @@ export async function recalculateAllScores() {
 
 /**
  * Score a single lead (at ingestion). Returns { score, tier, isPriority, reviewStatus }.
- * Uses manual tier lists when saved; otherwise profile-based hierarchy (default profile or prefs URL).
+ * When preference_active is ON: use manual Primary/Secondary/Tertiary lists. When OFF: use profile-based tiering (Your profile industry).
  */
 export async function scoreAndClassifyLead(lead) {
   const prefs = await loadPreferences();
@@ -572,9 +572,11 @@ export async function scoreAndClassifyLead(lead) {
     (tiers.secondary && (tiers.secondary.titles?.length || tiers.secondary.industries?.length || tiers.secondary.company_sizes?.length)) ||
     (tiers.tertiary && (tiers.tertiary.titles?.length || tiers.tertiary.industries?.length || tiers.tertiary.company_sizes?.length))
   );
+  const preferenceActive = Boolean(prefs?.preference_active);
+  const useManualTiers = preferenceActive && hasTierCriteria;
 
   let score, tier;
-  if (hasTierCriteria) {
+  if (useManualTiers) {
     let industryLabelToTopLevel = null;
     try {
       industryLabelToTopLevel = await getIndustryLabelToTopLevelMap();

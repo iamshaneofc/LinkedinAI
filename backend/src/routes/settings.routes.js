@@ -12,11 +12,14 @@ const __dirname = path.dirname(__filename);
 import config from '../config/index.js';
 import AIService, { getClaudeModel } from '../services/ai.service.js';
 
-const DEFAULT_LOGO_FILENAME = 'Screenshot 2026-03-06 135224.png';
+const DEFAULT_LOGO_FILENAME = 'Kinnote.png';
 const DEFAULT_LOGO_ABSOLUTE_PATH = path.join(__dirname, '..', 'config', DEFAULT_LOGO_FILENAME);
 
 const NAV_LOGO_FILENAME = 'logoSCI.jpg';
 const NAV_LOGO_ABSOLUTE_PATH = path.join(__dirname, '..', 'config', NAV_LOGO_FILENAME);
+
+const SEARCH_LOGO_FILENAME = 'Search.png';
+const SEARCH_LOGO_ABSOLUTE_PATH = path.join(__dirname, '..', 'config', SEARCH_LOGO_FILENAME);
 
 // Get branding / profile for dashboard welcome (user name, company, logo, profile image, theme)
 router.get('/branding', (req, res) => {
@@ -61,6 +64,19 @@ router.get('/logo/nav', (req, res) => {
     } catch (error) {
         console.error('Error serving nav logo:', error);
         return res.status(500).json({ error: 'Failed to load nav logo' });
+    }
+});
+
+// Serve the Search/Enrich icon (contacts table)
+router.get('/logo/search', (req, res) => {
+    try {
+        if (!fs.existsSync(SEARCH_LOGO_ABSOLUTE_PATH)) {
+            return res.status(404).json({ error: 'Search logo not found' });
+        }
+        return res.sendFile(SEARCH_LOGO_ABSOLUTE_PATH);
+    } catch (error) {
+        console.error('Error serving search logo:', error);
+        return res.status(500).json({ error: 'Failed to load search logo' });
     }
 });
 

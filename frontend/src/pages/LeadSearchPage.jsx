@@ -67,6 +67,27 @@ export default function LeadSearchPage() {
 
     // 1st degree (Phantom) import stats for widget: { saved, totalLeads, timestamp }
     const [firstDegreeImportStats, setFirstDegreeImportStats] = useState(null);
+    const [firstDegreeImportLoading, setFirstDegreeImportLoading] = useState(false);
+
+    const fetchFirstDegreeImportStats = () => {
+        setFirstDegreeImportLoading(true);
+        axios.get('/api/leads/imports?limit=50')
+            .then((res) => {
+                const rows = res.data || [];
+                const last = rows.find((r) => r.source === 'connections_export');
+                if (last) {
+                    setFirstDegreeImportStats({
+                        saved: last.saved ?? 0,
+                        totalLeads: last.total_leads ?? 0,
+                        timestamp: last.timestamp,
+                    });
+                } else {
+                    setFirstDegreeImportStats(null);
+                }
+            })
+            .catch(() => setFirstDegreeImportStats(null))
+            .finally(() => setFirstDegreeImportLoading(false));
+    };
 
     const handleSearch = async (e) => {
         if (e && e.preventDefault) e.preventDefault();
@@ -81,6 +102,10 @@ export default function LeadSearchPage() {
 
             const response = await axios.post(endpoint, {}, { timeout: 180000 });
             setResults(response.data);
+
+            if (importSource === 'connections_export') {
+                fetchFirstDegreeImportStats();
+            }
 
             if (response.data.totalLeads > 0) {
                 addToast(`✅ Found ${response.data.totalLeads} leads and saved ${response.data.savedToDatabase} to database!`, 'success');
@@ -104,25 +129,13 @@ export default function LeadSearchPage() {
         }
     };
 
-    // Fetch latest 1st degree import stats when "Import My Connections" is selected
+    // Fetch latest 1st degree import stats when "Import My Connections" is selected (and keep refetching so it stays current)
     useEffect(() => {
         if (importSource !== 'connections_export') {
             setFirstDegreeImportStats(null);
             return;
         }
-        axios.get('/api/leads/imports?limit=50')
-            .then((res) => {
-                const rows = res.data || [];
-                const last = rows.find((r) => r.source === 'connections_export');
-                if (last) {
-                    setFirstDegreeImportStats({
-                        saved: last.saved ?? 0,
-                        totalLeads: last.total_leads ?? 0,
-                        timestamp: last.timestamp,
-                    });
-                }
-            })
-            .catch(() => {});
+        fetchFirstDegreeImportStats();
     }, [importSource]);
 
     const handleFileSelect = (type) => {
@@ -273,17 +286,25 @@ export default function LeadSearchPage() {
                                 ))}
                             </div>
 
-                            {importSource === 'connections_export' && firstDegreeImportStats && (
+                            {importSource === 'connections_export' && (
                                 <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-foreground">
-                                    <span className="font-medium tabular-nums">
-                                        {firstDegreeImportStats.saved} / {firstDegreeImportStats.totalLeads} 1st Degree connections have been imported as of{' '}
-                                        {firstDegreeImportStats.timestamp
-                                            ? new Date(firstDegreeImportStats.timestamp).toLocaleString(undefined, {
-                                                dateStyle: 'medium',
-                                                timeStyle: 'short',
-                                            })
-                                            : '—'}
-                                    </span>
+                                    {firstDegreeImportLoading ? (
+                                        <span className="inline-flex items-center gap-2 text-muted-foreground">
+                                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                            Loading latest import…
+                                        </span>
+                                    ) : firstDegreeImportStats ? (
+                                        <span className="font-medium tabular-nums">
+                                            {firstDegreeImportStats.saved} / {firstDegreeImportStats.totalLeads} 1st degree connections imported
+                                            {firstDegreeImportStats.timestamp
+                                                ? ` as of ${new Date(firstDegreeImportStats.timestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
+                                                : ''}
+                                        </span>
+                                    ) : (
+                                        <span className="text-muted-foreground">
+                                            No 1st degree import yet. Run Engine to import your connections.
+                                        </span>
+                                    )}
                                 </div>
                             )}
 

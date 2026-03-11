@@ -198,7 +198,7 @@ export default function CampaignWizard({ onClose, onCreate }) {
         };
     };
 
-    /** Create campaign and go to My Contacts with filters + campaignId to select leads. */
+    /** Create campaign and go to My Contacts with filters in URL so the same filters are applied and you see the exact matching leads. */
     const handleCreateAndSelectLeads = async () => {
         if (audienceCount === 0 || estimating) return;
         const selectedGoal = CAMPAIGN_GOAL_OPTIONS.find((g) => g.value === campaignData.campaign_goal) || CAMPAIGN_GOAL_OPTIONS[0];
@@ -210,9 +210,10 @@ export default function CampaignWizard({ onClose, onCreate }) {
             const payload = buildCreatePayload();
             const id = await onCreate(payload);
             if (id) {
-                sessionStorage.setItem('campaignWizardAppliedFilters', JSON.stringify(campaignData.filters));
+                // Pass filters in URL so My Contacts page applies them and shows the same filtered leads (no manual re-apply)
+                const filtersParam = encodeURIComponent(JSON.stringify(campaignData.filters));
                 onClose();
-                navigate(`/my-contacts?campaignId=${id}&applyWizardFilters=1`);
+                navigate(`/my-contacts?campaignId=${id}&filters=${filtersParam}`);
                 addToast('Campaign created. Select leads below and click "Add to Campaign" to add them.', 'success');
             }
         } catch (err) {
@@ -402,7 +403,7 @@ export default function CampaignWizard({ onClose, onCreate }) {
                                     <div>
                                         <h3 className="font-semibold text-sm text-blue-900 dark:text-blue-100">Define Your Target Audience</h3>
                                         <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                                            Build filters to target specific leads from your database. You can combine multiple conditions.
+                                            Build filters to target specific leads from <strong>My Contacts</strong> (1st & 2nd degree). Count and preview show only those leads.
                                         </p>
                                     </div>
                                 </div>
@@ -431,7 +432,7 @@ export default function CampaignWizard({ onClose, onCreate }) {
                                         'Apply'
                                     )}
                                 </Button>
-                                <span className="text-xs text-muted-foreground">Apply to count leads matching the filters above.</span>
+                                <span className="text-xs text-muted-foreground">Apply to count leads in My Contacts matching the filters above.</span>
                             </div>
 
                             {/* Count only shown after Apply */}

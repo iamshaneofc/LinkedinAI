@@ -18,8 +18,7 @@ const navItems = [
         children: [
             { id: 'my-contacts', label: 'My Contacts', path: '/my-contacts' },
             { id: 'prospects', label: 'Prospects', path: '/prospects' },
-            { id: 'imported-leads', label: 'Imported Leads', path: '/imported-leads' },
-            { id: 'connections', label: 'Review Leads', path: '/connections' },
+            { id: 'leads', label: 'Leads', path: '/leads' },
         ],
     },
     {
@@ -132,10 +131,16 @@ export default function DashboardLayout() {
     const navLogoSrc = branding.navLogoUrl || '/api/settings/logo/nav';
     const [navLogoFailed, setNavLogoFailed] = useState(false);
     const logoFallbackSrc = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"/>');
+    const topLogoSrc = branding.logoUrl || '/api/settings/logo/default';
+    const [topLogoFailed, setTopLogoFailed] = useState(false);
 
     useEffect(() => {
         setNavLogoFailed(false);
     }, [branding.navLogoUrl]);
+
+    useEffect(() => {
+        setTopLogoFailed(false);
+    }, [branding.logoUrl]);
 
     const initials = getInitials(branding.userName || branding.companyName);
 
@@ -167,23 +172,36 @@ export default function DashboardLayout() {
                     {/* Sidebar inner (glassmorphism applied via global CSS) */}
                     <div className="flex flex-col h-full">
 
-                        {/* ── Logo area (Kinnote text only; no graphic logo) ── */}
+                        {/* ── Logo area (Kinnote logo at top) ── */}
                         <div className={cn(
                             "flex items-center border-b border-border/40 overflow-hidden transition-all duration-300",
                             sidebarOpen ? "h-[64px] px-5" : "h-[64px] px-0 justify-center"
                         )}>
                             {sidebarOpen ? (
                                 <div className="flex flex-col justify-center overflow-hidden select-none min-w-0">
-                                    <span className="font-heading font-black text-[20px] tracking-tight leading-none bg-gradient-to-r from-primary to-primary/80 bg-clip-text text-transparent">
-                                        Kinnote
-                                    </span>
+                                    {!topLogoFailed ? (
+                                        <img
+                                            src={topLogoSrc}
+                                            alt="Kinnote"
+                                            className="h-8 w-auto max-w-[180px] object-contain"
+                                            onError={() => setTopLogoFailed(true)}
+                                        />
+                                    ) : (
+                                        <span className="font-heading font-black text-[20px] tracking-tight leading-none bg-gradient-to-r from-primary to-primary/80 bg-clip-text text-transparent">
+                                            Kinnote
+                                        </span>
+                                    )}
                                     <span className="text-[10px] font-medium text-muted-foreground mt-1.5 leading-tight">
                                         <span className="block">Better conversations</span>
                                         <span className="block">by design.</span>
                                     </span>
                                 </div>
                             ) : (
-                                <span className="font-heading font-black text-xl tracking-tight bg-gradient-to-r from-primary to-primary/80 bg-clip-text text-transparent">K</span>
+                                !topLogoFailed ? (
+                                    <img src={topLogoSrc} alt="Kinnote" className="h-8 w-auto max-w-[48px] object-contain" onError={() => setTopLogoFailed(true)} />
+                                ) : (
+                                    <span className="font-heading font-black text-xl tracking-tight bg-gradient-to-r from-primary to-primary/80 bg-clip-text text-transparent">K</span>
+                                )
                             )}
                         </div>
 

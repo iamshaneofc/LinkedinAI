@@ -249,7 +249,7 @@ export async function getLeads(req, res) {
       conditionClauses.push(`NOT (is_priority = TRUE AND (connection_degree ILIKE '%1st%' OR connection_degree ILIKE '%2nd%'))`);
     }
     if (prospects === "true") {
-      conditionClauses.push(`id IN (SELECT lead_id FROM campaign_leads)`);
+      conditionClauses.push(`ever_in_campaign = TRUE`);
     }
     if (createdFrom) {
       conditionClauses.push(`created_at >= $${params.length + 1}`);
@@ -697,7 +697,7 @@ export async function getStats(req, res) {
       whereConditions.push(`NOT (is_priority = TRUE AND (connection_degree ILIKE '%1st%' OR connection_degree ILIKE '%2nd%'))`);
     }
     if (prospects === "true") {
-      whereConditions.push(`id IN (SELECT lead_id FROM campaign_leads)`);
+      whereConditions.push(`ever_in_campaign = TRUE`);
     }
 
     // Re-use logic from getLeads for building whereConditions
@@ -1151,6 +1151,7 @@ export async function addGmailToApprovals(req, res) {
         "INSERT INTO campaign_leads (campaign_id, lead_id, status) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
         [cid, leadId, "new"]
       );
+      await pool.query("UPDATE leads SET ever_in_campaign = TRUE WHERE id = $1", [leadId]);
     }
     const { ApprovalService } = await import("../services/approval.service.js");
     const content = JSON.stringify({ subject: String(subject), body: String(body) });
@@ -1221,6 +1222,10 @@ export async function bulkEnrichAndPersonalize(req, res) {
           [campaignId, leadId, 'new']
         );
       }
+      await pool.query(
+        "UPDATE leads SET ever_in_campaign = TRUE WHERE id = ANY($1::int[])",
+        [newLeads]
+      );
     }
 
     // Fetch campaign details for context (include settings for registration link)

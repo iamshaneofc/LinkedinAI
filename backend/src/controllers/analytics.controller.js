@@ -113,10 +113,12 @@ function getConnectionDegreeClause(columnPrefix = '') {
 
 // GET /api/analytics/dashboard
 // Returns all dashboard analytics: lead scraping + campaign metrics, with optional period and connection_degree filter
+// scope: 'my_contacts' (default) = only is_priority leads; 'all' = all leads
 export async function getDashboardAnalytics(req, res) {
   try {
-    const { period = "monthly", connection_degree, month, year } = req.query;
+    const { period = "monthly", connection_degree, month, year, scope = "my_contacts" } = req.query;
     const rawDegree = Array.isArray(connection_degree) ? connection_degree[0] : connection_degree;
+    const scopeFilter = (scope === "all" || scope === "all_leads") ? "" : " AND is_priority = TRUE";
 
     const now = new Date();
     const { start, end } = getDateRange(period, month, year);
@@ -132,35 +134,38 @@ export async function getDashboardAnalytics(req, res) {
     const connFilter = getConnectionDegreeClause()(rawDegree);
     const connFilterLeads = getConnectionDegreeClause('l')(rawDegree);
 
-    // Load LinkedIn industry hierarchy (top-level + sub-categories)
-    const { topLevel: industryMetaTop, subcategoriesByTop } =
-      await loadIndustryMetadata();
+    const leadWhere = `${dateFilter}${connFilter}${scopeFilter}`;
+    const leadWhereParams = effectiveLeadParam;
 
     // —— Lead Scraping & Extraction ——
     const totalLeads = await pool.query(
-      `SELECT COUNT(*) AS count FROM leads WHERE ${dateFilter}${connFilter}`,
-      effectiveLeadParam
+      `SELECT COUNT(*) AS count FROM leads WHERE ${leadWhere}`,
+      leadWhereParams
     );
     const sourceBreakdown = await pool.query(
-      `SELECT source, COUNT(*) AS count FROM leads WHERE ${dateFilter}${connFilter} GROUP BY source`,
-      effectiveLeadParam
+      `SELECT source, COUNT(*) AS count FROM leads WHERE ${leadWhere} GROUP BY source`,
+      leadWhereParams
     );
     const sourceCount = sourceBreakdown.rows.reduce((acc, row) => {
       acc[row.source || "unknown"] = parseInt(row.count, 10);
       return acc;
     }, {});
     const withPhone = await pool.query(
-      `SELECT COUNT(*) AS count FROM leads WHERE phone IS NOT NULL AND TRIM(phone) != '' AND ${dateFilter}${connFilter}`,
-      effectiveLeadParam
+      `SELECT COUNT(*) AS count FROM leads WHERE phone IS NOT NULL AND TRIM(phone) != '' AND ${leadWhere}`,
+      leadWhereParams
     );
     const withEmail = await pool.query(
-      `SELECT COUNT(*) AS count FROM leads WHERE email IS NOT NULL AND TRIM(email) != '' AND ${dateFilter}${connFilter}`,
-      effectiveLeadParam
+      `SELECT COUNT(*) AS count FROM leads WHERE email IS NOT NULL AND TRIM(email) != '' AND ${leadWhere}`,
+      leadWhereParams
     );
     const actionableLeads = await pool.query(
-      `SELECT COUNT(*) AS count FROM leads WHERE status = $3 AND ${dateFilter}${connFilter}`,
-      [...effectiveLeadParam, "approved"]
+      `SELECT COUNT(*) AS count FROM leads WHERE status = $3 AND ${leadWhere}`,
+      [...leadWhereParams, "approved"]
     );
+
+    // Load LinkedIn industry hierarchy (top-level + sub-categories) for industry distribution
+    const { topLevel: industryMetaTop, subcategoriesByTop } =
+      await loadIndustryMetadata();
 
     // Industry-wise distribution using shared config
     // Using the imported industryKeywords
@@ -173,8 +178,8 @@ export async function getDashboardAnalytics(req, res) {
     });
 
     const leadsForIndustry = await pool.query(
-      `SELECT id, COALESCE(company,'') AS company, COALESCE(title,'') AS title FROM leads WHERE ${dateFilter}${connFilter}`,
-      effectiveLeadParam
+      `SELECT id, COALESCE(company,'') AS company, COALESCE(title,'') AS title FROM leads WHERE ${leadWhere}`,
+      leadWhereParams
     );
 
     // ── Industry Classification Loop ──────────────────────────────────────────
@@ -238,14 +243,13 @@ export async function getDashboardAnalytics(req, res) {
       }
     }
 
-    // ── Lead Quality Distribution (all leads; primary = high quality, secondary = warm, tertiary = less warm) ──────
-    // Count by COALESCE(manual_tier, preference_tier); treat null as tertiary so totals match totalLeads
+    // ── Lead Quality Distribution (primary/secondary/tertiary; respects scope) ──────
     const tierResult = await pool.query(
       `SELECT COALESCE(manual_tier, preference_tier, 'tertiary') AS effective_tier, COUNT(*) AS cnt
          FROM leads
-        WHERE ${dateFilter}${connFilter}
+        WHERE ${leadWhere}
         GROUP BY COALESCE(manual_tier, preference_tier, 'tertiary')`,
-      effectiveLeadParam
+      leadWhereParams
     );
 
     let primaryCount = 0;
@@ -305,21 +309,19 @@ export async function getDashboardAnalytics(req, res) {
 
     // Extraction by period (leads created in last interval)
     const extractionByPeriod = await pool.query(
-      `SELECT COUNT(*) AS count FROM leads WHERE ${dateFilter}${connFilter}`,
-      effectiveLeadParam
+      `SELECT COUNT(*) AS count FROM leads WHERE ${leadWhere}`,
+      leadWhereParams
     );
 
-    // Connection type breakdown - Query actual connection degrees from database
-    // PhantomBuster stores values like "1st", "2nd", "3rd" in connection_degree column
-    // When connection_degree filter is active, only the selected degree will have non-zero count
+    // Connection type breakdown
     const connectionBreakdownResult = await pool.query(`
-      SELECT 
+      SELECT
         connection_degree,
         COUNT(*) as count
       FROM leads
-      WHERE connection_degree IS NOT NULL AND connection_degree != '' AND ${dateFilter}${connFilter}
+      WHERE connection_degree IS NOT NULL AND connection_degree != '' AND ${leadWhere}
       GROUP BY connection_degree
-    `, effectiveLeadParam);
+    `, leadWhereParams);
 
     const connectionBreakdown = {
       firstDegree: 0,
@@ -435,6 +437,7 @@ export async function getDashboardAnalytics(req, res) {
 
     const response = {
       period,
+      scope: scope === "all" || scope === "all_leads" ? "all" : "my_contacts",
       leadScraping: {
         totalLeads: parseInt(totalLeads.rows[0]?.count || 0, 10),
         sourceCount,

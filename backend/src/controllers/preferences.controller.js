@@ -78,8 +78,8 @@ export async function getPreferences(req, res) {
     }
 }
 
-// Helper: update branding (user name + profile image) in .env from LinkedIn profile data
-async function updateBrandingFromProfile(userName, profileImageUrl) {
+// Helper: update branding (user name, profile image, company) in .env from profile data
+async function updateBrandingFromProfile(userName, profileImageUrl, companyName) {
     try {
         const path = (await import('path')).default;
         const fs = (await import('fs')).default;
@@ -99,6 +99,7 @@ async function updateBrandingFromProfile(userName, profileImageUrl) {
         };
         if (userName) setEnv('APP_USER_NAME', userName);
         if (profileImageUrl) setEnv('APP_PROFILE_IMAGE_URL', profileImageUrl);
+        if (companyName) setEnv('APP_COMPANY_NAME', companyName);
         fs.writeFileSync(envPath, envContent.trim() + '\n');
     } catch (e) {
         console.warn('[preferences] updateBrandingFromProfile:', e.message);
@@ -148,23 +149,12 @@ export async function updatePreferences(req, res) {
             auto_approval_threshold,
         });
 
-        // Fetch profile name and picture from LinkedIn URL and update branding (app bar shows initials + profile image)
-        const urlToFetch = (linkedin_profile_url && typeof linkedin_profile_url === 'string') ? linkedin_profile_url.trim() : '';
-        if (urlToFetch && urlToFetch.includes('linkedin.com')) {
-            try {
-                const phantomService = (await import('../services/phantombuster.service.js')).default;
-                const scrape = await phantomService.scrapeProfile(urlToFetch);
-                if (scrape && scrape.data) {
-                    const d = scrape.data;
-                    const fullName = d.fullName || [d.firstName, d.lastName].filter(Boolean).join(' ').trim() || null;
-                    const profileImageUrl = d.profileImage || d.profileImageUrl || d.imgUrl || null;
-                    if (fullName || profileImageUrl) {
-                        await updateBrandingFromProfile(fullName || undefined, profileImageUrl || undefined);
-                    }
-                }
-            } catch (e) {
-                console.warn('[preferences] Could not fetch LinkedIn profile for branding:', e.message);
-            }
+        // Apply manual profile_meta to branding (name + company) when user filled "Your profile" and saved
+        const meta = profile_meta && typeof profile_meta === 'object' ? profile_meta : {};
+        const manualName = meta.name || meta.fullName;
+        const manualCompany = meta.company;
+        if (manualName || manualCompany) {
+            await updateBrandingFromProfile(manualName || undefined, undefined, manualCompany || undefined);
         }
 
         // Rescore in background so the response returns immediately and Save button stops spinning
@@ -189,12 +179,10 @@ export async function togglePreferenceActive(req, res) {
 
         await savePreferences({ ...prefs, preference_active: !!active });
 
-        // Rescoring is needed when activating so leads get proper tier assignments
-        if (active) {
-            recalculateAllScores().catch(err =>
-                console.error('[preferences] Background rescore (toggle) error:', err)
-            );
-        }
+        // Rescore when toggling so leads get correct tier mode (Active = manual tiers, Paused = profile-based)
+        recalculateAllScores().catch(err =>
+            console.error('[preferences] Background rescore (toggle) error:', err)
+        );
 
         return res.json({
             success: true,
@@ -218,8 +206,7 @@ export async function rescoreLeads(req, res) {
     }
 }
 
-// POST /api/preferences/analyze — AI suggest tiered preferences from LinkedIn Profile URL
-// Fills Primary, Secondary, and Tertiary with 3–5 options each; no value repeated across tiers.
+// POST /api/preferences/analyze — Fill tiers from profile: manual name/title/industry only (no URL scrape).
 const TITLE_OPTIONS = ['CEO', 'CTO', 'CFO', 'Director', 'Manager', 'VP', 'Founder', 'Head of', 'Lead', 'Engineer', 'Analyst', 'Consultant', 'Specialist'];
 const INDUSTRY_OPTIONS_FALLBACK = [
     'Technology, Information and Media', 'Financial Services', 'Professional Services', 'Manufacturing', 'Retail', 'Education',
@@ -273,130 +260,84 @@ function ensureCount(arr, pool, minCount, excludeSet, prefer) {
 
 export async function analyzeProfileForPreferences(req, res) {
     try {
-        const { linkedin_profile_url } = req.body || {};
-        if (!linkedin_profile_url || typeof linkedin_profile_url !== 'string') {
-            return res.status(400).json({ error: 'linkedin_profile_url is required' });
-        }
-        const url = linkedin_profile_url.trim();
-        if (!url.includes('linkedin.com')) {
-            return res.status(400).json({ error: 'Valid LinkedIn profile URL is required' });
-        }
+        const { name, title, industry } = req.body || {};
+        const profileName = name && typeof name === 'string' ? name.trim() : '';
+        const profileTitle = title && typeof title === 'string' ? title.trim() : '';
+        const profileIndustry = industry && typeof industry === 'string' ? industry.trim() : '';
 
-        let profileMeta = {};
-
-        // 1) Try Phantom scrape first so Analyze is dynamic per URL every time (no cache)
-        try {
-            const phantomService = (await import('../services/phantombuster.service.js')).default;
-            const scrape = await phantomService.scrapeProfile(url);
-            if (scrape && scrape.data) {
-                const d = scrape.data;
-                const title = d.title || d.headline || d.position || d.jobTitle || '';
-                const company = d.company || d.currentCompany || d.companyName || '';
-                const industry = d.industry || d.industryName || '';
-                let companySize = d.companySize || d.company_size || d.employees || d.companySizeRange || '';
-                if (companySize && typeof companySize === 'string') {
-                    // Normalize to SIZE_OPTIONS format (e.g. "51-200" or "201-500")
-                    const n = companySize.toLowerCase().replace(/\s*employees?\s*/gi, '').trim();
-                    if (/^1-10$|^1\s*to\s*10$/i.test(n)) companySize = '1-10';
-                    else if (/^11-50$|^11\s*to\s*50$/i.test(n)) companySize = '11-50';
-                    else if (/^51-200$|^51\s*to\s*200$/i.test(n)) companySize = '51-200';
-                    else if (/^201-500$|^201\s*to\s*500$/i.test(n)) companySize = '201-500';
-                    else if (/500\+|501\+|500\s*plus/i.test(n)) companySize = '500+';
-                }
-                profileMeta = { title, industry, company, companySize };
-            }
-        } catch (e) {
-            console.warn('[preferences] Analyze Phantom scrape failed (will try DB fallback):', e.message);
+        if (!profileTitle && !profileIndustry) {
+            return res.status(400).json({ error: 'Fill at least Title or Industry in Your profile, then click Analyze.' });
+        }
+        if (!profileName || !profileTitle || !profileIndustry) {
+            return res.status(400).json({ error: 'Please set your profile title, industry — everything is mandatory here.' });
         }
 
-        // 2) Fallback: profile from DB if not in leads / Phantom not configured or failed
-        if (!profileMeta.title && !profileMeta.industry) {
-            try {
-                const profileEnrichmentService = (await import('../services/profileEnrichment.service.js')).default;
-                const profile = await profileEnrichmentService.enrichProfileFromUrl(url);
-                if (profile) {
-                    profileMeta = {
-                        title: profile.title || profile.headline,
-                        industry: profile.industry,
-                        company: profile.company,
-                        companySize: profile.companySize || profile.company_size,
-                    };
-                }
-            } catch (e) {
-                console.warn('[preferences] Analyze profile fetch failed:', e.message);
-            }
+        const AIService = (await import('../services/ai.service.js')).default;
+        if (!AIService.isConfigured()) {
+            return res.status(400).json({ error: 'OpenAI or Claude API key required for Analyze. Configure in Settings.' });
         }
-
-        const profileTitle = profileMeta.title ? String(profileMeta.title).trim() : '';
-        let profileIndustry = profileMeta.industry ? String(profileMeta.industry).trim() : '';
-        const profileSize = profileMeta.companySize ? String(profileMeta.companySize).trim() : '';
 
         const { getIndustryLabels } = await import('../services/industryList.service.js');
         const industryLabels = await getIndustryLabels();
         const INDUSTRY_OPTIONS = industryLabels.length > 0 ? industryLabels : INDUSTRY_OPTIONS_FALLBACK;
 
-        // Match scraped industry to a known label so it appears in dropdown (best substring/token match)
-        if (profileIndustry && INDUSTRY_OPTIONS.length > 0) {
-            const pl = profileIndustry.toLowerCase();
-            const exact = INDUSTRY_OPTIONS.find(o => normaliseForDedup(o) === pl);
-            if (exact) profileIndustry = exact;
-            else {
-                const contained = INDUSTRY_OPTIONS.find(o => pl.includes(normaliseForDedup(o)) || normaliseForDedup(o).includes(pl));
-                if (contained) profileIndustry = contained;
-            }
+        const prompt = `You are helping set up lead prioritization tiers for a CRM.
+
+Profile (the user):
+- Name: ${profileName || 'Not provided'}
+- Title: ${profileTitle || 'Not provided'}
+- Industry: ${profileIndustry || 'Not provided'}
+
+Using ONLY the titles, industries, and sizes from the lists below, suggest 3-5 values for each tier. Primary = most relevant to this profile. Secondary = related but not top match. Tertiary = broader/other. No duplicate value across tiers.
+
+Titles (use only these): ${TITLE_OPTIONS.join(', ')}
+Industries (use only these): ${INDUSTRY_OPTIONS.slice(0, 80).join(', ')}${INDUSTRY_OPTIONS.length > 80 ? '...' : ''}
+Company sizes (use only these): ${SIZE_OPTIONS.join(', ')}
+
+Return ONLY valid JSON (no markdown, no explanation):
+{"primary":{"titles":[],"industries":[],"company_sizes":[]},"secondary":{"titles":[],"industries":[],"company_sizes":[]},"tertiary":{"titles":[],"industries":[],"company_sizes":[]}}
+
+Each array must have 3-5 values. Use only exact strings from the lists above.`;
+
+        const raw = await AIService.callAI(prompt, 600, 0.3);
+        if (!raw || typeof raw !== 'string') {
+            return res.status(500).json({ error: 'AI did not return valid suggestions.' });
+        }
+        const cleaned = raw.replace(/```\w*\n?/g, '').replace(/```/g, '').trim();
+        let parsed;
+        try {
+            parsed = JSON.parse(cleaned);
+        } catch (e) {
+            console.warn('[preferences] Analyze AI JSON parse failed:', e.message);
+            return res.status(500).json({ error: 'AI response was not valid JSON.' });
         }
 
-        // Primary: 3–5 each, starting from profile (then fill from pools)
-        const primaryTitles = ensureCount(
-            profileTitle ? [profileTitle] : [],
-            TITLE_OPTIONS,
-            3,
-            [],
-            profileTitle
-        );
-        const primaryIndustries = ensureCount(
-            profileIndustry ? [profileIndustry] : [],
-            INDUSTRY_OPTIONS,
-            3,
-            [],
-            profileIndustry
-        );
-        const primarySizes = ensureCount(
-            profileSize ? [profileSize] : [],
-            SIZE_OPTIONS,
-            3,
-            [],
-            profileSize
-        );
-
-        const usedTitles = new Set(primaryTitles.map(normaliseForDedup));
-        const usedIndustries = new Set(primaryIndustries.map(normaliseForDedup));
-        const usedSizes = new Set(primarySizes.map(normaliseForDedup));
-
-        // Secondary: 3–5 each, no overlap with primary
-        const secondaryTitles = pickFromPool(TITLE_OPTIONS, 4, usedTitles);
-        secondaryTitles.forEach(t => usedTitles.add(normaliseForDedup(t)));
-        const secondaryIndustries = pickFromPool(INDUSTRY_OPTIONS, 4, usedIndustries);
-        secondaryIndustries.forEach(i => usedIndustries.add(normaliseForDedup(i)));
-        const secondarySizes = pickFromPool(SIZE_OPTIONS, 4, usedSizes);
-        secondarySizes.forEach(s => usedSizes.add(normaliseForDedup(s)));
-
-        // Tertiary: 3–5 each, no overlap with primary or secondary
-        const tertiaryTitles = pickFromPool(TITLE_OPTIONS, 4, usedTitles);
-        tertiaryTitles.forEach(t => usedTitles.add(normaliseForDedup(t)));
-        const tertiaryIndustries = pickFromPool(INDUSTRY_OPTIONS, 4, usedIndustries);
-        const tertiarySizes = pickFromPool(SIZE_OPTIONS, 4, usedSizes);
-
         const suggested = validatePreferenceTiers({
-            primary: { titles: primaryTitles, industries: primaryIndustries, company_sizes: primarySizes },
-            secondary: { titles: secondaryTitles, industries: secondaryIndustries, company_sizes: secondarySizes },
-            tertiary: { titles: tertiaryTitles, industries: tertiaryIndustries, company_sizes: tertiarySizes },
+            primary: {
+                titles: Array.isArray(parsed.primary?.titles) ? parsed.primary.titles.filter(t => TITLE_OPTIONS.includes(t)).slice(0, 5) : [],
+                industries: Array.isArray(parsed.primary?.industries) ? parsed.primary.industries.filter(i => INDUSTRY_OPTIONS.includes(i)).slice(0, 5) : [],
+                company_sizes: Array.isArray(parsed.primary?.company_sizes) ? parsed.primary.company_sizes.filter(s => SIZE_OPTIONS.includes(s)).slice(0, 5) : [],
+            },
+            secondary: {
+                titles: Array.isArray(parsed.secondary?.titles) ? parsed.secondary.titles.filter(t => TITLE_OPTIONS.includes(t)).slice(0, 5) : [],
+                industries: Array.isArray(parsed.secondary?.industries) ? parsed.secondary.industries.filter(i => INDUSTRY_OPTIONS.includes(i)).slice(0, 5) : [],
+                company_sizes: Array.isArray(parsed.secondary?.company_sizes) ? parsed.secondary.company_sizes.filter(s => SIZE_OPTIONS.includes(s)).slice(0, 5) : [],
+            },
+            tertiary: {
+                titles: Array.isArray(parsed.tertiary?.titles) ? parsed.tertiary.titles.filter(t => TITLE_OPTIONS.includes(t)).slice(0, 5) : [],
+                industries: Array.isArray(parsed.tertiary?.industries) ? parsed.tertiary.industries.filter(i => INDUSTRY_OPTIONS.includes(i)).slice(0, 5) : [],
+                company_sizes: Array.isArray(parsed.tertiary?.company_sizes) ? parsed.tertiary.company_sizes.filter(s => SIZE_OPTIONS.includes(s)).slice(0, 5) : [],
+            },
         }) || DEFAULT_TIERS;
+
+        const profileMetaForSave = { name: profileName || undefined, title: profileTitle || undefined, industry: profileIndustry || undefined };
+
+        console.log('[Analyze] Filled Primary/Secondary/Tertiary from Your profile (Name, Title, Industry) using AI.');
 
         return res.json({
             success: true,
             suggested,
-            profile_meta: profileMeta,
+            profile_meta: profileMetaForSave,
         });
     } catch (err) {
         console.error('[preferences] analyze error:', err);
