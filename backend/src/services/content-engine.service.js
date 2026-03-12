@@ -458,7 +458,15 @@ export const ContentPhantomService = {
         const { default: GoogleSheetsService } = await import('./googleSheets.service.js');
         let appendedRange = null;
 
-        // 1. Append to sheet first so Phantom has this post to read
+        // 1. Clear sheet data rows (keep header) so Phantom only sees this one post
+        try {
+            await GoogleSheetsService.clearDataRows();
+        } catch (clearErr) {
+            console.error(`❌ ContentEngine: Failed to clear sheet before send.`, clearErr);
+            throw new Error(`Failed to clear sheet: ${clearErr.message}`);
+        }
+
+        // 2. Append only this item's content so Phantom has exactly one post to read
         try {
             const appendResult = await GoogleSheetsService.appendPost(content);
             appendedRange = appendResult.updates?.updatedRange || appendResult.updatedRange;
@@ -468,13 +476,32 @@ export const ContentPhantomService = {
             throw new Error(`Failed to write to Google Sheet: ${sheetError.message}`);
         }
 
+        // Brief delay so the sheet write is visible before the phantom reads it
+        const sheetSyncDelayMs = Number(process.env.CONTENT_ENGINE_SHEET_SYNC_DELAY_MS) || 3000;
+        if (sheetSyncDelayMs > 0) {
+            console.log(`⏳ ContentEngine: Waiting ${sheetSyncDelayMs}ms for sheet to sync before launching phantom...`);
+            await new Promise(r => setTimeout(r, sheetSyncDelayMs));
+        }
+
         try {
             const result = await this._launchPhantomOnly(item);
 
-            // 2. Wait for the container to finish so we only mark POSTED when it actually succeeded
+            // 3. Wait for the container to finish so we only mark POSTED when it actually succeeded
             const { default: pb } = await import('./phantombuster.service.js');
             const maxWaitMinutes = 5;
             await pb.waitForCompletion(result.containerId, result.phantomId, maxWaitMinutes);
+
+            // Log what the phantom actually did (helps debug "launch then immediately stop")
+            try {
+                const containerOutput = await pb.fetchContainerOutput(result.containerId);
+                if (containerOutput) {
+                    console.log(`📋 ContentEngine: Phantom container output:\n${containerOutput}`);
+                } else {
+                    console.log(`📋 ContentEngine: No container output (phantom may have run successfully with no log).`);
+                }
+            } catch (logErr) {
+                console.warn('ContentEngine: Could not fetch container output:', logErr?.message || logErr);
+            }
 
             await pool.query(
                 `UPDATE content_items SET
@@ -521,7 +548,12 @@ export const ContentPhantomService = {
         }
     },
 
-    /** Internal: append is done in sendNow; this only launches the Phantom (sheet already has the new row). */
+    /** Internal: append is done in sendNow; this only launches the Phantom (sheet already has the new row).
+     *  Phantom uses dashboard config only (no launch args). Ensure in PhantomBuster:
+     *  - Spreadsheet URL = same as GOOGLE_SHEET_ID (e.g. https://docs.google.com/spreadsheets/d/<GOOGLE_SHEET_ID>/edit)
+     *  - Sheet/tab name = Sheet1, columns A = post content, B = status
+     *  - "Posts per launch" (or similar) >= 1 so it processes the new row
+     */
     async _launchPhantomOnly(item) {
         const phantomId = process.env.LINKEDIN_AUTO_POSTER_PHANTOM_ID || process.env.MESSAGE_SENDER_PHANTOM_ID;
 

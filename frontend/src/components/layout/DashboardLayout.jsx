@@ -127,11 +127,18 @@ export default function DashboardLayout() {
     const displayName = (nameForDisplay.trim().split(/\s+/).length >= 2)
         ? getInitials(nameForDisplay)
         : (nameForDisplay || 'there');
-    // Logo shown in nav section below (e.g. Scottish / nav logo)
-    const navLogoSrc = branding.navLogoUrl || '/api/settings/logo/nav';
+    // Logo URLs: use backend base in production so Vercel loads from API
+    const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '').trim();
+    const navLogoSrc = (() => {
+        const u = branding.navLogoUrl || '/api/settings/logo/nav';
+        return (apiBase && u.startsWith('/')) ? apiBase + u : u;
+    })();
     const [navLogoFailed, setNavLogoFailed] = useState(false);
     const logoFallbackSrc = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"/>');
-    const topLogoSrc = branding.logoUrl || '/api/settings/logo/default';
+    const topLogoSrc = (() => {
+        const u = branding.logoUrl || '/api/settings/logo/default';
+        return (apiBase && u.startsWith('/')) ? apiBase + u : u;
+    })();
     const [topLogoFailed, setTopLogoFailed] = useState(false);
 
     useEffect(() => {

@@ -6,8 +6,9 @@ import axios from 'axios';
 import { Search, MoreVertical, RefreshCw, Linkedin, Trash2, Edit2, Download, Filter, ChevronDown, ChevronUp, Loader2, Sparkles, MapPin, Building2, Briefcase, Target, Database, Eye, Check, X, Mail, Phone, UserPlus, Users, Network, Contact, Upload, AlertTriangle, Columns3, GripVertical, Clock, FileText, ShieldCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-/** Search/Enrich icon (used for Enrich action in contacts). */
-const ENRICH_ICON = '/api/settings/logo/search';
+/** Search/Enrich icon – use backend base URL in production so Vercel loads from API */
+const API_BASE = (import.meta.env?.VITE_API_URL || '').replace(/\/$/, '').trim();
+const ENRICH_ICON = API_BASE ? `${API_BASE}/api/settings/logo/search` : '/api/settings/logo/search';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';

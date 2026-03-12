@@ -91,7 +91,25 @@ function getSheetId() {
 
 // ─── PUBLIC API ───────────────────────────────────────────────────────────────
 
+/** Range for data rows only (excludes header row 1). Cleared before each send so phantom sees only one post. */
+const DATA_ROWS_RANGE = 'Sheet1!A2:B1000';
+
 const GoogleSheetsService = {
+
+    /**
+     * Clear all data rows in Sheet1 (keeps row 1 header: Post | Status).
+     * Call before appendPost on "Send now" so the phantom only sees the single post we just added.
+     */
+    async clearDataRows() {
+        const auth = getAuthClient();
+        const sheets = google.sheets({ version: 'v4', auth });
+        const spreadsheetId = getSheetId();
+        await sheets.spreadsheets.values.clear({
+            spreadsheetId,
+            range: DATA_ROWS_RANGE,
+        });
+        console.log('📊 GoogleSheets: Cleared data rows (Sheet1 row 2 onward) so only one post will be sent.');
+    },
 
     /**
      * Append a single post to the Google Sheet.
