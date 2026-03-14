@@ -604,7 +604,7 @@ export default function DashboardPage() {
 
           {/* Right: Actions Group (Time + Import) */}
           <div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto justify-end">
-            {/* Time Range Group + Info */}
+            {/* Time Range Group */}
             <div className="flex items-center gap-2">
               <div className="flex rounded-lg border bg-muted/40 p-1">
               {PERIODS.map((p) => {
@@ -662,9 +662,6 @@ export default function DashboardPage() {
                 );
               })}
             </div>
-            <InfoTooltip
-              content="Dashboard and CRM stats are filtered by this period. Daily = today, Weekly = current week, Monthly/Yearly = select a specific month or year."
-            />
           </div>
 
             {/* Dashboard scope: My Contacts (default) vs All Leads */}
