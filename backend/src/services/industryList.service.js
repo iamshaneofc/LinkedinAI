@@ -40,7 +40,10 @@ export async function getIndustryList() {
         return cache;
     }
 
+    console.warn('[industries] linkedin_industries table is empty in DB! Falling back to JSON file.');
+
     if (!fs.existsSync(JSON_PATH)) {
+        console.error('[industries] Industry JSON file fallback NOT FOUND at:', JSON_PATH);
         cache = [];
         return cache;
     }
@@ -48,6 +51,7 @@ export async function getIndustryList() {
     const raw = fs.readFileSync(JSON_PATH, 'utf8');
     const list = JSON.parse(raw);
     if (!Array.isArray(list)) {
+        console.error('[industries] Industry JSON file is not an array!');
         cache = [];
         return cache;
     }

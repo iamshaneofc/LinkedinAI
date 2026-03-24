@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "seed:industries": "npm run seed:industries --prefix backend"
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
     "googleapi": "^1.0.2",
