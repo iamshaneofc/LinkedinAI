@@ -198,7 +198,14 @@ const SettingsPage = () => {
   useEffect(() => {
     axios
       .get("/api/settings/branding")
-      .then((r) => setBranding(r.data || {}))
+      .then((r) => {
+        const data = r.data || {};
+        // Use "Jhon Doe" as default/override for Rishab variants or empty name for the demo
+        if (!data.userName || data.userName === 'Rishab Khandelwal' || data.userName === 'Rishab Khandlewal' || data.userName === 'there') {
+          data.userName = 'Jhon Doe';
+        }
+        setBranding(data);
+      })
       .catch(() => { });
   }, []);
 

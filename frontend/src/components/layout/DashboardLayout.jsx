@@ -78,10 +78,17 @@ export default function DashboardLayout() {
         // Default to dark for better overall UX and reduced eye strain
         return true;
     });
-    const [branding, setBranding] = useState({ userName: '', companyName: '', logoUrl: '', profileImageUrl: '', theme: 'default', linkedinAccountName: '' });
+    const [branding, setBranding] = useState({ userName: 'Jhon Doe', companyName: '', logoUrl: '', profileImageUrl: '', theme: 'default', linkedinAccountName: '' });
 
     useEffect(() => {
-        axios.get('/api/settings/branding').then((r) => setBranding(r.data || {})).catch(() => { });
+        axios.get('/api/settings/branding').then((r) => {
+            const data = r.data || {};
+            // Use "Jhon Doe" as default/override for Rishab or empty name for the demo
+            if (!data.userName || data.userName === 'Rishab Khandelwal' || data.userName === 'Rishab Khandlewal' || data.userName === 'there') {
+                data.userName = 'Jhon Doe';
+            }
+            setBranding(data);
+        }).catch(() => { });
     }, []);
 
     useEffect(() => {
@@ -123,10 +130,8 @@ export default function DashboardLayout() {
     };
 
     // Show initials (e.g. RK) when we have first + last name; otherwise show full name or company
-    const nameForDisplay = branding.userName || branding.companyName || '';
-    const displayName = (nameForDisplay.trim().split(/\s+/).length >= 2)
-        ? getInitials(nameForDisplay)
-        : (nameForDisplay || 'there');
+    const nameForDisplay = branding.userName || 'Jhon Doe';
+    const displayName = nameForDisplay;
     // Logo URLs: use backend base in production so Vercel loads from API
     const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '').trim();
     const navLogoSrc = (() => {
@@ -149,7 +154,7 @@ export default function DashboardLayout() {
         setTopLogoFailed(false);
     }, [branding.logoUrl]);
 
-    const initials = getInitials(branding.userName || branding.companyName);
+    const initials = getInitials(nameForDisplay);
 
     // Determine the current page label for the header breadcrumb
     const currentPage = navItems.reduce((found, item) => {
@@ -214,11 +219,13 @@ export default function DashboardLayout() {
 
                         {/* ── Nav ── */}
                         <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4 px-3">
+                            {/* Hide secondary branding for demo
                             {sidebarOpen && (
                                 <div className="mb-4 flex justify-center px-2">
                                     <img src={navLogoFailed ? logoFallbackSrc : navLogoSrc} alt="Kinnote" className="h-14 w-auto max-w-[200px] object-contain" onError={() => setNavLogoFailed(true)} />
                                 </div>
                             )}
+                            */}
 
                             <div className="space-y-1">
                                 {navItems.map((item) => {
@@ -412,7 +419,8 @@ export default function DashboardLayout() {
                                 {sidebarOpen && (
                                     <div className="flex-1 min-w-0">
                                         <p className="font-semibold text-sm truncate">{displayName}</p>
-                                        <p className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5">{branding.companyName || 'Kinnote'}</p>
+                                        {/* Hide company branding for demo */}
+                                        {/* <p className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5">{branding.companyName || 'Kinnote'}</p> */}
                                     </div>
                                 )}
                             </div>
@@ -475,14 +483,7 @@ export default function DashboardLayout() {
                                 )}
                                 <div className="flex flex-col min-w-0 flex-1">
                                     <span className="text-sm font-semibold text-foreground leading-none truncate">{displayName}</span>
-                                    {branding.linkedinAccountName ? (
-                                        <span className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5 truncate">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block shrink-0" />
-                                            <span className="truncate">{branding.linkedinAccountName}</span>
-                                        </span>
-                                    ) : (
-                                        <span className="text-[11px] text-muted-foreground mt-0.5 truncate" title="Better conversations, by design.">Better conversations, by design.</span>
-                                    )}
+                                    <span className="text-[11px] text-muted-foreground mt-0.5 truncate" title="Better conversations, by design.">Better conversations, by design.</span>
                                 </div>
                             </div>
                         </div>
