@@ -78,15 +78,11 @@ export default function DashboardLayout() {
         // Default to dark for better overall UX and reduced eye strain
         return true;
     });
-    const [branding, setBranding] = useState({ userName: 'Jhon Doe', companyName: '', logoUrl: '', profileImageUrl: '', theme: 'default', linkedinAccountName: '' });
+    const [branding, setBranding] = useState({ userName: 'Rishab Khandelwal', companyName: '', logoUrl: '', profileImageUrl: '', theme: 'default', linkedinAccountName: '' });
 
     useEffect(() => {
         axios.get('/api/settings/branding').then((r) => {
             const data = r.data || {};
-            // Use "Jhon Doe" as default/override for Rishab or empty name for the demo
-            if (!data.userName || data.userName === 'Rishab Khandelwal' || data.userName === 'Rishab Khandlewal' || data.userName === 'there') {
-                data.userName = 'Jhon Doe';
-            }
             setBranding(data);
         }).catch(() => { });
     }, []);
@@ -130,7 +126,7 @@ export default function DashboardLayout() {
     };
 
     // Show initials (e.g. RK) when we have first + last name; otherwise show full name or company
-    const nameForDisplay = branding.userName || 'Jhon Doe';
+    const nameForDisplay = branding.userName || 'Rishab Khandelwal';
     const displayName = nameForDisplay;
     // Logo URLs: use backend base in production so Vercel loads from API
     const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '').trim();
@@ -219,13 +215,11 @@ export default function DashboardLayout() {
 
                         {/* ── Nav ── */}
                         <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4 px-3">
-                            {/* Hide secondary branding for demo
                             {sidebarOpen && (
                                 <div className="mb-4 flex justify-center px-2">
                                     <img src={navLogoFailed ? logoFallbackSrc : navLogoSrc} alt="Kinnote" className="h-14 w-auto max-w-[200px] object-contain" onError={() => setNavLogoFailed(true)} />
                                 </div>
                             )}
-                            */}
 
                             <div className="space-y-1">
                                 {navItems.map((item) => {
@@ -419,8 +413,7 @@ export default function DashboardLayout() {
                                 {sidebarOpen && (
                                     <div className="flex-1 min-w-0">
                                         <p className="font-semibold text-sm truncate">{displayName}</p>
-                                        {/* Hide company branding for demo */}
-                                        {/* <p className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5">{branding.companyName || 'Kinnote'}</p> */}
+                                        <p className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5">{branding.companyName || 'Scottish Chemicals'}</p>
                                     </div>
                                 )}
                             </div>
