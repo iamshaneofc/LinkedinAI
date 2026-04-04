@@ -15,7 +15,7 @@ export default {
         },
         extend: {
             colors: {
-                dark: { 900: '#0f172a', 800: '#1e293b', 700: '#334155' },
+                dark: { 900: '#05080f', 800: '#0d1421', 700: '#1a2233' },
                 heading: {
                     1: "hsl(var(--heading-1))",
                     2: "hsl(var(--heading-2))",

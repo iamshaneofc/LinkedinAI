@@ -38,30 +38,30 @@
   }
 
   .dark {
-    --background: 222 47% 11%;
-    --foreground: 214 32% 91%;
-    --heading-1: 214 32% 91%;
-    --heading-2: 211 100% 50%;
-    --card: 217 33% 17%;
-    --card-foreground: 214 32% 91%;
-    --popover: 217 33% 15%;
-    --popover-foreground: 214 32% 91%;
-    --primary: 263 48% 48%;
-    --primary-foreground: 0 0% 100%;
-    --secondary-btn: 234 53% 51%;
-    --secondary: 224 15% 14%;
+    --background: 222 47% 4%;
+    --foreground: 213 31% 91%;
+    --heading-1: 213 31% 91%;
+    --heading-2: 217 91% 60%;
+    --card: 222 47% 10%;
+    --card-foreground: 213 31% 91%;
+    --popover: 222 47% 12%;
+    --popover-foreground: 213 31% 91%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 222 47% 4%;
+    --secondary-btn: 213 31% 20%;
+    --secondary: 222 47% 12%;
     --secondary-foreground: 213 31% 80%;
-    --muted: 224 15% 13%;
-    --muted-foreground: 215 16% 52%;
-    --accent: 224 15% 14%;
-    --accent-foreground: 213 31% 95%;
-    --destructive: 0 63% 48%;
-    --destructive-foreground: 213 31% 95%;
-    --border: 0 0% 35%;
-    --separator: 0 0% 35%;
-    --input: 224 14% 14%;
-    --ring: 263 48% 48%;
-    --shadow-color: 263deg 48% 48%;
+    --muted: 222 47% 8%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 217 91% 60% / 0.15;
+    --accent-foreground: 217 91% 60%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217 33% 18%;
+    --separator: 217 33% 15%;
+    --input: 222 47% 12%;
+    --ring: 217 91% 60%;
+    --shadow-color: 217deg 91% 60%;
   }
 
   /* ── Theme overrides (optional accent tweaks) ── */
@@ -227,9 +227,9 @@
 
 .dark .aurora-bg {
   background:
-    radial-gradient(ellipse 80% 50% at 20% -10%, hsl(var(--primary) / 0.18) 0%, transparent 55%),
-    radial-gradient(ellipse 60% 40% at 80% 10%, hsl(263 70% 58% / 0.12) 0%, transparent 50%),
-    radial-gradient(ellipse 40% 30% at 50% 90%, hsl(142 71% 45% / 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse 80% 50% at 20% -10%, hsl(217 91% 60% / 0.15) 0%, transparent 55%),
+    radial-gradient(ellipse 60% 40% at 80% 10%, hsl(217 91% 60% / 0.1) 0%, transparent 50%),
+    radial-gradient(ellipse 40% 30% at 50% 90%, hsl(222 47% 15% / 0.2) 0%, transparent 50%),
     hsl(var(--background));
   background-size: 200% 200%;
   animation: aurora-shift 25s ease-in-out infinite;
@@ -276,8 +276,8 @@ aside {
 }
 
 .dark aside {
-  background: #1E293B !important;
-  border-right-color: hsl(var(--separator)) !important;
+  background: hsl(var(--card) / 0.8) !important;
+  border-right-color: hsl(var(--border)) !important;
   box-shadow: 4px 0 32px -8px hsl(0 0% 0% / 0.5);
 }
 

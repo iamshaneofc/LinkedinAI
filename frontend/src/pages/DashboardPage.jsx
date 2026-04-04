@@ -353,7 +353,7 @@ export default function DashboardPage() {
       name: "Primary",
       qualification: "High relevance match",
       value: lq.primary,
-      fill: "#10b981",
+      fill: "hsl(var(--primary))",
       desc: "Highest relevance matches",
       percentage:
         totalQualityLeads > 0 ? Math.round((lq.primary / totalQualityLeads) * 100) : 0,
@@ -365,7 +365,7 @@ export default function DashboardPage() {
       name: "Secondary",
       qualification: "Medium relevance match",
       value: lq.secondary,
-      fill: "#3b82f6",
+      fill: "hsl(var(--primary) / 0.7)",
       desc: "Medium relevance matches",
       percentage:
         totalQualityLeads > 0 ? Math.round((lq.secondary / totalQualityLeads) * 100) : 0,
@@ -377,7 +377,7 @@ export default function DashboardPage() {
       name: "Tertiary",
       qualification: "Low relevance match",
       value: lq.tertiary,
-      fill: "#94a3b8",
+      fill: "hsl(var(--muted-foreground) / 0.6)",
       desc: "Lower relevance matches",
       percentage:
         totalQualityLeads > 0 ? Math.round((lq.tertiary / totalQualityLeads) * 100) : 0,
@@ -750,7 +750,7 @@ export default function DashboardPage() {
               <div className="flex flex-col gap-2 mb-6">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                    <Sparkles className="h-3.5 w-3.5 text-yellow-500" />
+                    <Sparkles className="h-3.5 w-3.5 text-primary" />
                     Lead quality tiers
                     <InfoTooltip
                       content={
