@@ -78,9 +78,9 @@ async function init() {
     .then((r) => { if (r.qualified > 0) logger.info(`🎯 Qualify-by-niche (startup): ${r.qualified}/${r.total} leads qualified`); })
     .catch((err) => logger.warn("Qualify-by-niche startup failed (non-fatal):", err.message));
 
-  app.listen(PORT, () => {
-    console.log(`✅ Server running on port ${PORT}`);
-    console.log(`   API base URL for frontend: http://localhost:${PORT}`);
+  app.listen(5000, "0.0.0.0", () => {
+    console.log("✅ Server running on port 5000");
+    console.log("   API base URL for frontend: http://localhost:5000");
     console.log(`   Campaign launch logs will appear here when you click Launch.`);
   });
 }
