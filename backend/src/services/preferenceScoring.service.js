@@ -497,7 +497,7 @@ export async function recalculateAllScores() {
         aiResult = calculateScoreFromProfile(lead, profileForTier.userTopLevel, profileForTier.userSub);
       }
 
-      // 3. Merged logic: Manual Primary > Manual Other > AI Fallback (Strict Primary)
+      // 3. Merged logic: Manual Primary > Manual Other > AI Fallback
       if (manualResult && manualResult.tier === 'primary') {
         score = manualResult.score;
         tier = 'primary';
@@ -506,11 +506,17 @@ export async function recalculateAllScores() {
         tier = manualResult.tier;
       } else if (aiResult && aiResult.tier) {
         score = aiResult.score;
-        // Downgrade AI Primary to Secondary if no manual match (keeping Primary "most accurate")
-        tier = aiResult.tier === 'primary' ? 'secondary' : aiResult.tier;
+        tier = aiResult.tier;
       } else {
         score = manualResult?.score ?? aiResult?.score ?? defaultQualityScore(lead);
         tier = null;
+      }
+
+      // Ensure 1st degree connections show up in primary if needed
+      const connDegree = String(lead.connection_degree || lead.connectionDegree || '').toLowerCase();
+      if (tier !== 'primary' && (connDegree.includes('1st') || connDegree === '1')) {
+        tier = 'primary';
+        score = Math.max(score || 0, 75);
       }
 
       allUpdates.push({
@@ -609,7 +615,7 @@ export async function scoreAndClassifyLead(lead) {
     aiResult = calculateScoreFromProfile(lead, profileForTier.userTopLevel, profileForTier.userSub);
   }
 
-  // 3. Merged logic: Manual Primary > Manual Other > AI Fallback (Strict Primary)
+  // 3. Merged logic: Manual Primary > Manual Other > AI Fallback
   if (manualResult && manualResult.tier === 'primary') {
     score = manualResult.score;
     tier = 'primary';
@@ -618,11 +624,17 @@ export async function scoreAndClassifyLead(lead) {
     tier = manualResult.tier;
   } else if (aiResult && aiResult.tier) {
     score = aiResult.score;
-    // Strict Primary: AI Primary is downgraded if it didn't match manual Primary
-    tier = aiResult.tier === 'primary' ? 'secondary' : aiResult.tier;
+    tier = aiResult.tier;
   } else {
     score = manualResult?.score ?? aiResult?.score ?? defaultQualityScore(lead);
     tier = null;
+  }
+
+  // Ensure 1st degree connections show up in primary if needed
+  const connDegree = String(lead.connection_degree || lead.connectionDegree || '').toLowerCase();
+  if (tier !== 'primary' && (connDegree.includes('1st') || connDegree === '1')) {
+    tier = 'primary';
+    score = Math.max(score || 0, 75);
   }
 
   const { isPriority, reviewStatus } = applyPriorityRule(score, tier, prefs);
